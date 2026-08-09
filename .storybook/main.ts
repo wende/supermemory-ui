@@ -45,16 +45,11 @@ const config: StorybookConfig = {
     return config;
   },
 
-  // Prop tables are read from the TS types, which is where this codebase
-  // documents its component contracts.
+  // Storybook's TypeScript docgen plugin does not yet support TypeScript 7.
+  // The React parser keeps prop tables and controls available without loading
+  // the incompatible TypeScript compiler integration.
   typescript: {
-    reactDocgen: "react-docgen-typescript",
-    reactDocgenTypescriptOptions: {
-      shouldExtractLiteralValuesFromEnum: true,
-      shouldRemoveUndefinedFromOptional: true,
-      propFilter: (prop) =>
-        prop.parent ? !/node_modules/.test(prop.parent.fileName) : true,
-    },
+    reactDocgen: "react-docgen",
   },
 };
 
