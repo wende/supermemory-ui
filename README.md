@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/readme/hero.png" alt="supermemory ui — See what your memory engine knows. Trace how it got there." width="100%">
+  <img src="docs/readme/hero.jpg" alt="BY WENDE — supermemory-ui" width="100%">
 </p>
 
 <p align="center">
@@ -70,28 +70,20 @@ soft-forget, graph, and search semantics as the live surface.
 
 ## Quick start
 
-Requires Node.js 20 or newer.
+Requires Node.js 20.9 or newer. This runs the same optimized Next.js build that
+you would deploy:
 
 ```bash
 git clone https://github.com/wende/supermemory-ui.git
 cd supermemory-ui
-npm install
-npm run dev
+npm ci
+npm run build
+npm run start
 ```
 
 Open [http://localhost:3000](http://localhost:3000). No backend or API key is
 needed: the console starts against its bundled mock and every screen is ready
 to use.
-
-```bash
-npm run storybook    # component workbench on :6006
-npm test             # Vitest suite
-npm run typecheck    # strict TypeScript check
-npm run build        # production build
-```
-
-GitHub Actions and Vercel deploy independently; the exact checks and deployment
-triggers are documented in [`.github/workflows/README.md`](.github/workflows/README.md).
 
 Or try the hosted mock immediately at
 [supermemory-ui.vercel.app](https://supermemory-ui.vercel.app).
@@ -111,7 +103,9 @@ SUPERMEMORY_URL=http://localhost:6767
 SUPERMEMORY_KEY=sm_your_key
 
 # terminal 2
-npm run dev
+npm ci
+npm run build
+npm run start
 ```
 
 The browser talks only to this app's `/api/*` routes. Next.js route handlers
@@ -179,6 +173,22 @@ The visual system is documented in Storybook and in [`DESIGN.md`](DESIGN.md):
 quiet light/dark surfaces, dense operator-first layouts, and a
 colour-vision-validated categorical palette where colour is never the only
 signal.
+
+## Development
+
+Use the development server only when working on the project:
+
+```bash
+npm install
+npm run dev             # local development with hot reload
+npm run typecheck       # strict TypeScript check
+npm test                # Vitest suite
+npm run storybook       # component workbench on :6006
+npm run build-storybook # static Storybook build
+```
+
+GitHub Actions and Vercel deploy independently; the exact checks and deployment
+triggers are documented in [`.github/workflows/README.md`](.github/workflows/README.md).
 
 ## Stack
 
