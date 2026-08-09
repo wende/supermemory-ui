@@ -3,8 +3,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useRouteParams } from "@/components/route-host";
-import { GraphCanvas, type HoverInfo } from "@/components/graph/graph-canvas";
+import {
+  GraphCanvas,
+  type HoverInfo,
+  type LayoutStatus,
+} from "@/components/graph/graph-canvas";
 import { GraphDetail } from "@/components/graph/graph-detail";
+import { GraphProgress } from "@/components/graph/graph-progress";
 import { GraphLegend } from "@/components/graph/graph-legend";
 import { GraphToolbar, GraphCustomizeButton } from "@/components/graph/graph-settings-panel";
 import { Skeleton } from "@/components/ui";
@@ -32,6 +37,12 @@ import type { GraphNode, MemoryEntry } from "@/lib/types";
 
 /** Every memory, indexed for node enrichment and the detail panel. */
 export const GRAPH_MEMORIES = { includeForgotten: true, limit: 500 } as const;
+
+/**
+ * Below this the settle finishes in well under a second, so the progress meter
+ * would appear and vanish before it could be read.
+ */
+const LAYOUT_PROGRESS_MIN_NODES = 400;
 
 function spaceNameMap(
   spaces: { containerTag: string; name: string }[],
@@ -63,6 +74,7 @@ export function GraphView() {
   }));
   const [selected, setSelected] = useState<GraphNode | null>(null);
   const [hover, setHover] = useState<HoverInfo | null>(null);
+  const [layout, setLayout] = useState<LayoutStatus | null>(null);
   const hydratedUrl = useRef(false);
   const skipNextSave = useRef(true);
 
@@ -443,7 +455,21 @@ export function GraphView() {
               selectedId={selected?.id ?? null}
               onSelect={handleSelect}
               onHoverChange={setHover}
+              onLayoutStatus={setLayout}
               fitRef={fitRef}
+            />
+          ) : null}
+
+          {/* Only worth a meter when the wait is perceptible; small graphs
+              settle in a frame or two and a flashing bar is just noise. */}
+          {loading && !displayData ? (
+            <GraphProgress phase="fetching" />
+          ) : layout?.active && layout.nodes > LAYOUT_PROGRESS_MIN_NODES ? (
+            <GraphProgress
+              phase="layout"
+              completed={layout.completed}
+              total={layout.total}
+              nodes={layout.nodes}
             />
           ) : null}
 
