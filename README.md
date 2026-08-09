@@ -90,6 +90,9 @@ npm run typecheck    # strict TypeScript check
 npm run build        # production build
 ```
 
+GitHub Actions and Vercel deploy independently; the exact checks and deployment
+triggers are documented in [`.github/workflows/README.md`](.github/workflows/README.md).
+
 Or try the hosted mock immediately at
 [supermemory-ui.vercel.app](https://supermemory-ui.vercel.app).
 
