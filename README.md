@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/readme/hero.jpg" alt="BY WENDE — supermemory-ui" width="100%">
+  <img src="docs/readme/wordmark.svg" alt="supermemory-ui" width="100%">
 </p>
 
 <p align="center">
