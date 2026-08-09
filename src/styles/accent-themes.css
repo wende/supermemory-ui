@@ -1,0 +1,82 @@
+/**
+ * Accent themes — chromatic tokens only (series, status, brand pills).
+ * Surfaces stay in globals.css (:root / .dark).
+ *
+ * Apply via <html data-accent="te-orange"> (default; currently the only pack).
+ * To add a theme: copy a block, rename the attribute value, register it in
+ * src/lib/accent-theme.ts.
+ *
+ * Contrast: TE Orange keeps vivid chroma for accents/status/badges even when
+ * some pairings sit under strict WCAG AA 4.5:1. That is an intentional product
+ * choice — see .agents/skills/custom-codereview-guide.md. Do not "fix" by
+ * dulling these tokens without an explicit design decision.
+ */
+
+/* ── TE Orange ──────────────────────────────────────────────────── */
+
+[data-accent="te-orange"] {
+  /* Align shadcn status with reserved status */
+  --destructive: #e01820;
+  --destructive-foreground: #ffffff;
+  --success: #1f8a5b;
+  --success-foreground: #ffffff;
+  --warning: #ff5500;
+  --warning-foreground: #0c0e12;
+
+  --brand-success-bg: #b8dcc8;
+  --brand-success-text: #0f5c3a;
+  --brand-success: var(--brand-success-bg);
+  --brand-ongoing: #b8dce4;
+  --brand-ongoing-text: #0f6a78;
+  --brand-running: var(--brand-ongoing);
+  --brand-running-text: var(--brand-ongoing-text);
+  --brand-failure: #f0b8ba;
+  --brand-failure-text: #9a1a20;
+  --brand-paused-bg: #ffd0b8;
+  --brand-paused-text: #9a3a00;
+  --brand-paused: var(--brand-paused-bg);
+
+  --s1: #2b6fa8; /* documents · steel   */
+  --s2: #ff5500; /* spaces    · orange      */
+  --s3: #1fa0b5; /* memories  · cyan        */
+  --s4: #6e7c8a; /* chunks    · fader grey */
+  --s5: #e23a8c; /* relations · magenta   */
+
+  --good: #1f8a5b;
+  --warning-status: #ff5500;
+  --serious: #c96a42;
+  --critical: #e01820;
+}
+
+.dark[data-accent="te-orange"] {
+  --destructive: #ff2a32;
+  --destructive-foreground: #ffffff;
+  --success: #2bb87a;
+  --success-foreground: #0c0e12;
+  --warning: #ff6a1a;
+  --warning-foreground: #0c0e12;
+
+  --brand-success-bg: #1a3d2c;
+  --brand-success-text: #7ddea0;
+  --brand-success: var(--brand-success-bg);
+  --brand-ongoing: #1a3a42;
+  --brand-ongoing-text: #7ecfde;
+  --brand-running: var(--brand-ongoing);
+  --brand-running-text: var(--brand-ongoing-text);
+  --brand-failure: #4a1e20;
+  --brand-failure-text: #f09096;
+  --brand-paused-bg: #4a2a18;
+  --brand-paused-text: #ffb080;
+  --brand-paused: var(--brand-paused-bg);
+
+  --s1: #4b8fcb;
+  --s2: #ff6a1a;
+  --s3: #2ebfd4;
+  --s4: #8a98a6;
+  --s5: #f04a9a;
+
+  --good: #2bb87a;
+  --warning-status: #ff6a1a;
+  --serious: #ec835a;
+  --critical: #ff2a32;
+}

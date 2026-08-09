@@ -1,0 +1,23 @@
+<!--
+  The brand wordmark is Lexend Exa 200. The app loads it through
+  `next/font/google` in `src/app/layout.tsx`; Storybook pulls the same face
+  from the CDN and exposes it under the token the components read.
+
+  If the font can't be fetched (offline workbench), the stack falls back to
+  the UI sans and nothing else in the story breaks.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link
+  href="https://fonts.googleapis.com/css2?family=Lexend+Exa:wght@200;300&display=swap"
+  rel="stylesheet"
+/>
+<script>
+  // Match the app: chromatic tokens resolve under html[data-accent="te-orange"].
+  document.documentElement.dataset.accent = "te-orange";
+</script>
+<style>
+  :root {
+    --font-brand: "Lexend Exa", system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+</style>

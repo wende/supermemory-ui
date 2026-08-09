@@ -1,0 +1,33 @@
+name: Agentic PR Review
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review, synchronize]
+  # Uncomment to skip review on workflow-only changes.
+  # paths-ignore:
+  #   - '**/*.md'
+  #   - '.github/**'
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: agentic-pr-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      !contains(github.event.pull_request.labels.*.name, 'skip-review')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    continue-on-error: true
+    steps:
+      - name: Review pull request
+        uses: wende/agentic-pr-review@4641826751d7f6a16216e2a2e690ae7fffdb9b50 # v1.1.1
+        with:
+          llm-api-key: ${{ secrets.MINIMAX_API_KEY }}
+          github-token: ${{ github.token }}

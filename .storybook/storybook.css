@@ -1,0 +1,60 @@
+/*
+ * Workbench-only styling. Nothing here is shipped with the app — it exists so
+ * the canvas and the docs pages read the same way the console does.
+ */
+
+/* Storybook paints its own ground behind the iframe; keep both in step with
+   the theme decorator so a dark story never sits on a white page. */
+html,
+body,
+#storybook-root {
+  background-color: var(--background);
+}
+
+#storybook-root {
+  color: var(--foreground);
+}
+
+/* Docs pages render outside the story decorator, so give them the app's
+   type and ground explicitly. */
+.sbdocs.sbdocs-wrapper {
+  background-color: var(--background);
+  font-family: var(--font-sans);
+}
+
+.sbdocs.sbdocs-wrapper .sbdocs-content {
+  max-width: 1100px;
+}
+
+.sbdocs h1.sbdocs-title,
+.sbdocs h2.sbdocs-subtitle,
+.sbdocs h2.sbdocs-h2,
+.sbdocs h3.sbdocs-h3,
+.sbdocs p.sbdocs-p,
+.sbdocs li.sbdocs-li,
+.sbdocs td.sbdocs-td,
+.sbdocs th.sbdocs-th {
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}
+
+.sbdocs p.sbdocs-p,
+.sbdocs li.sbdocs-li {
+  color: color-mix(in oklab, var(--foreground) 78%, transparent);
+}
+
+.sbdocs hr.sbdocs-hr,
+.sbdocs .docblock-argstable-body tr td {
+  border-color: var(--border);
+}
+
+.sbdocs .docblock-argstable-head th {
+  color: color-mix(in oklab, var(--foreground) 55%, transparent);
+}
+
+/* The preview frame inside a docs page should show the story's surface, not
+   Storybook's default white. */
+.sbdocs .docs-story,
+.sbdocs .sb-story {
+  background-color: var(--background);
+}

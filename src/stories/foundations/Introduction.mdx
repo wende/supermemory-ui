@@ -1,0 +1,92 @@
+import { Meta } from "@storybook/addon-docs/blocks";
+
+<Meta title="Foundations/Introduction" />
+
+<div className="label">supermemory · design system</div>
+
+# The console workbench
+
+This Storybook is the working surface for **supermemory local** — an open-source
+window into a self-hosted memory engine. Every token, primitive and block the
+app ships is documented here, rendered against the same `globals.css` the app
+loads, in both themes.
+
+Written prose about the system lives in [`DESIGN.md`](https://github.com/wende/supermemory-ui/blob/main/DESIGN.md).
+This is the executable half of it: if a rule in that document is real, there is
+a story here that shows it.
+
+---
+
+## Feel
+
+> Quiet operator console — not a marketing site, not a dense IDE.
+
+The product is a window into a memory engine: ingestion, recall, graph, and
+settings. The UI stays out of the way. Surfaces are soft and slightly elevated;
+**colour is reserved for data and status**. Interaction is deliberate rather
+than playful.
+
+| Attribute | Direction |
+| --- | --- |
+| Mood | Calm, precise, airy |
+| Density | Comfortable — room to breathe, not sparse |
+| Chromaticity | Near-monochrome chrome; chroma only for series and status |
+| Depth | Soft cards on a cool gray field; hairline borders, not hard shadows |
+| Metaphor | Local console / control room, not dashboard SaaS |
+
+---
+
+## How this Storybook is organised
+
+**Foundations** — the raw material. Colour roles, the type scale, the surface
+recipe, motion tokens, the icon set, and the formatting helpers that decide how
+numbers and timestamps read.
+
+**Primitives** — `src/components/ui/*`. shadcn-style, Radix-backed, unopinionated
+about the product. Button, Switch, Tabs, Tooltip, Sheet, Sidebar.
+
+**Console Kit** — `src/components/ui/index.tsx`. The product-flavoured layer:
+`Card`, `Input`, `Select`, `Toggle`, `Badge`, `Drawer`, `Copyable`, toasts. This
+is what page code actually imports.
+
+**Blocks** — `src/components/blocks/*`. Composed surfaces with a fixed
+hierarchy: `PanelCard`, `StatsCard`, `StatusPill`, `EmptyState`, `PillTabList`.
+
+**Charts** — `src/components/charts.tsx`. Stat tiles, line chart, bar rows,
+segmented status bar, sparkline, similarity meter.
+
+**Graph** — the memory-graph chrome: legend, node detail, customise panel.
+
+**Layout** — the shell itself: sidebar rail, sticky header, page container.
+
+**Patterns** — whole screens assembled from the above, so you can see whether a
+change to a block survives contact with a real page.
+
+---
+
+## Two rules that explain most of the palette
+
+1. **Series colours** (`--s1`…`--s5`) mean *this is a kind of thing* — documents,
+   spaces, memories, chunks, relations. They appear in charts and entity accents.
+2. **Status colours** (`--good`, `--warning-status`, `--serious`, `--critical`,
+   and the brand status fills) mean *this is how it is going*.
+
+They never swap. A failing document is `--critical`, never `--s2`; the documents
+series is `--s1`, never `--good`. Status is also never colour-only: pills carry
+uppercase labels, document types pair a glyph with a written label.
+
+---
+
+## Working in here
+
+- The **theme switcher** in the toolbar flips `.dark` on `<html>`, exactly as
+  `ThemeToggle` does in the app. Check every change in both.
+- The **accessibility** panel runs axe against the rendered story. Findings are
+  reported, not enforced — but a new violation on a primitive is a bug.
+- Stories are co-located with their components (`*.stories.tsx`), so a component
+  and its documentation move together.
+
+```bash
+npm run storybook        # workbench on :6006
+npm run build-storybook  # static build into storybook-static/
+```
