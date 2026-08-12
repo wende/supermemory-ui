@@ -404,13 +404,23 @@ export async function liveGraph(
   },
   onProgress?: (progress: CorpusProgress) => void,
 ): Promise<GraphResponse> {
-  const { tags: allTags, docs, mems: allMems } = await loadCorpus(onProgress);
+  // Page only the requested spaces, not the whole instance. `loadCorpus()`
+  // (used by liveSpaces) always crawls every tag because it needs per-space
+  // counts; a graph scoped to one space of the request doesn't, and its
+  // progress meter would otherwise climb against the whole corpus's total.
+  // Documents aren't taggable at the API, so they're still paged in full and
+  // matched up by id/containerTags below.
+  const allTags = await resolveTags();
   const tags = opts.containerTags?.length ? opts.containerTags : allTags;
-  const mems = allMems.filter(
-    (m) =>
-      tags.includes(m.spaceId) &&
-      (opts.includeForgotten || !m.isForgotten),
+  const scopedMems = await pageAllMemories(tags, onProgress);
+  const memTotal = scopedMems.length;
+  const docs = await pageAllDocuments((p) =>
+    onProgress?.({
+      loaded: memTotal + p.loaded,
+      total: memTotal + Math.max(p.total, p.loaded),
+    }),
   );
+  const mems = scopedMems.filter((m) => opts.includeForgotten || !m.isForgotten);
 
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];

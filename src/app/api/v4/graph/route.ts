@@ -47,8 +47,15 @@ export async function GET(req: Request) {
   const encoder = new TextEncoder();
   const body = new ReadableStream<Uint8Array>({
     async start(controller) {
+      // A client that navigates away mid-stream closes the readable side,
+      // and `enqueue` throws on a controller past that point. That's not an
+      // error worth surfacing — just stop writing.
       const send = (event: StreamEvent) => {
-        controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+        try {
+          controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+        } catch {
+          // Client gone; nothing to report to.
+        }
       };
       try {
         if (wantsRemote(req)) {
@@ -65,7 +72,11 @@ export async function GET(req: Request) {
           error: err instanceof Error ? err.message : String(err),
         });
       } finally {
-        controller.close();
+        try {
+          controller.close();
+        } catch {
+          // Already closed/errored by the client side.
+        }
       }
     },
   });
@@ -92,7 +103,11 @@ async function streamMockGraph(
   send: (event: StreamEvent) => void,
 ) {
   const pageSize = 25;
+  // Scope paging to the requested spaces, same as the live path — otherwise
+  // the meter reports progress against the whole corpus for a request that
+  // only wants one space.
   const first = listMemories({
+    containerTags: opts.containerTags,
     includeForgotten: opts.includeForgotten,
     page: 1,
     limit: pageSize,
@@ -114,6 +129,7 @@ async function streamMockGraph(
   while (page <= totalPages) {
     await delay(30);
     const { memoryEntries, pagination } = listMemories({
+      containerTags: opts.containerTags,
       includeForgotten: opts.includeForgotten,
       page,
       limit: pageSize,
