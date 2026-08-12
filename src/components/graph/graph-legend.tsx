@@ -1,6 +1,6 @@
 "use client";
 
-import { useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { NODE_COLOR, tokenCssVar } from "@/lib/graph/palette";
 import type { ColorGroup, ColorToken } from "@/lib/graph/types";
 import type { GraphNodeKind } from "@/lib/types";
@@ -40,6 +40,53 @@ export type SpaceLegendItem = {
   count: number;
 };
 
+/**
+ * Territory colour key as a floating card over the canvas. Used when the
+ * canvas is landscape — the bottom bar keeps Nodes/Edges only, and this sits
+ * top-right in the same chrome the graph used to float its legend with.
+ */
+export function GraphSpacesFloat({
+  spaces,
+  className,
+  style,
+}: {
+  spaces: SpaceLegendItem[];
+  className?: string;
+  style?: CSSProperties;
+}) {
+  if (!spaces.length) return null;
+  return (
+    <div
+      className={cn(
+        "pointer-events-none absolute top-3 right-3 z-10 rounded-xl border border-brand-black/[0.05] bg-background/92 px-3 py-2.5",
+        className,
+      )}
+      style={style}
+      role="note"
+      aria-label="Spaces"
+    >
+      <div className="label mb-2">Spaces</div>
+      <ul className="space-y-1">
+        {spaces.map((s) => (
+          <li
+            key={s.id}
+            className="flex items-center gap-2 text-[11px] text-brand-black/70"
+          >
+            <span
+              className="size-2.5 shrink-0 rounded-[3px] opacity-60"
+              style={{
+                background: `color-mix(in oklab, ${tokenCssVar(s.token)} 40%, transparent)`,
+              }}
+            />
+            <span className="max-w-[9rem] truncate">{s.label}</span>
+            <span className="tnum ml-auto pl-3 text-brand-black/40">{s.count}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 export function GraphLegend({
   counts,
   showForgotten,
@@ -48,6 +95,8 @@ export function GraphLegend({
   groupHeading = "Nodes",
   showContainsEdges = true,
   spaces,
+  /** When true, territory colours are shown elsewhere (floating card). */
+  floatSpaces = false,
   trailing,
 }: {
   counts: Record<GraphNodeKind, number>;
@@ -58,10 +107,11 @@ export function GraphLegend({
   showContainsEdges?: boolean;
   /** Territory colours when space blobs are on (and not using colour-by-space fills). */
   spaces?: SpaceLegendItem[];
+  floatSpaces?: boolean;
   trailing?: React.ReactNode;
 }) {
   const useGroups = colorGroups.length > 0;
-  const showSpaceTerritories = !!spaces?.length && !useGroups;
+  const showSpaceTerritories = !!spaces?.length && !useGroups && !floatSpaces;
   const edgeItems = showContainsEdges
     ? EDGE_LEGEND
     : EDGE_LEGEND.filter((e) => e.label !== "in space");
@@ -95,6 +145,7 @@ export function GraphLegend({
     colorGroups.length,
     showSpaceTerritories,
     spaces?.length,
+    floatSpaces,
     edgeItems.length,
   ]);
 

@@ -23,6 +23,9 @@ import type {
   ServerInfo,
 } from "./types";
 
+/** How far through the remote memory crawl a graph build has gotten. */
+export type CorpusProgress = { loaded: number; total: number };
+
 async function pageAllDocuments(): Promise<Document[]> {
   const out: Document[] = [];
   let page = 1;
@@ -40,33 +43,78 @@ async function pageAllDocuments(): Promise<Document[]> {
   return out;
 }
 
-async function pageAllMemories(tags: string[]): Promise<MemoryEntry[]> {
-  if (!tags.length) return [];
+async function pageAllMemories(
+  tags: string[],
+  onProgress?: (progress: CorpusProgress) => void,
+): Promise<MemoryEntry[]> {
+  if (!tags.length) {
+    onProgress?.({ loaded: 0, total: 0 });
+    return [];
+  }
   // Fetch per tag so we can stamp the human containerTag onto spaceId.
   // The live API returns opaque internal space IDs (e.g. qvZATN…), which
   // otherwise never match tag filters in the graph / spaces aggregators.
-  const byId = new Map<string, MemoryEntry>();
-  await Promise.all(
+  //
+  // Tags are probed in parallel for totals, then drained sequentially so
+  // `loaded` climbs monotonically and the UI meter can track real pages.
+  const probes = await Promise.all(
     tags.map(async (tag) => {
-      let page = 1;
-      let totalPages = 1;
-      while (page <= totalPages && page <= 50) {
-        const { ok, data } = await proxyJson<MemoryListResponse>(
-          "/v4/memories/list",
-          {
-            method: "POST",
-            json: { containerTags: [tag], page, limit: 100 },
-          },
-        );
-        if (!ok || !data?.memoryEntries) break;
-        for (const entry of normalizeMemories(data.memoryEntries, tag)) {
-          byId.set(entry.id, entry);
-        }
-        totalPages = data.pagination?.totalPages ?? 1;
-        page += 1;
-      }
+      const { ok, data } = await proxyJson<MemoryListResponse>(
+        "/v4/memories/list",
+        {
+          method: "POST",
+          json: { containerTags: [tag], page: 1, limit: 100 },
+        },
+      );
+      return { tag, ok, data };
     }),
   );
+
+  let total = 0;
+  for (const { ok, data } of probes) {
+    if (!ok || !data) continue;
+    total += data.pagination?.totalItems ?? data.memoryEntries?.length ?? 0;
+  }
+
+  const byId = new Map<string, MemoryEntry>();
+  let loaded = 0;
+  const report = () =>
+    onProgress?.({ loaded, total: Math.max(total, loaded) });
+
+  // Publish the denominator before the first page lands so the meter opens
+  // at 0/N instead of an unknown wait.
+  report();
+
+  for (const { tag, ok, data: first } of probes) {
+    if (!ok || !first?.memoryEntries) continue;
+
+    for (const entry of normalizeMemories(first.memoryEntries, tag)) {
+      byId.set(entry.id, entry);
+    }
+    loaded += first.memoryEntries.length;
+    report();
+
+    let page = 2;
+    let totalPages = first.pagination?.totalPages ?? 1;
+    while (page <= totalPages && page <= 50) {
+      const { ok: pageOk, data } = await proxyJson<MemoryListResponse>(
+        "/v4/memories/list",
+        {
+          method: "POST",
+          json: { containerTags: [tag], page, limit: 100 },
+        },
+      );
+      if (!pageOk || !data?.memoryEntries) break;
+      for (const entry of normalizeMemories(data.memoryEntries, tag)) {
+        byId.set(entry.id, entry);
+      }
+      loaded += data.memoryEntries.length;
+      totalPages = data.pagination?.totalPages ?? totalPages;
+      report();
+      page += 1;
+    }
+  }
+
   return Array.from(byId.values());
 }
 
@@ -162,12 +210,12 @@ async function buildSpaces(
 }
 
 /** Shared remote corpus snapshot for aggregators. */
-async function loadCorpus() {
+async function loadCorpus(onProgress?: (progress: CorpusProgress) => void) {
   const tags = await resolveTags();
-  const [docs, mems] = await Promise.all([
-    pageAllDocuments(),
-    pageAllMemories(tags),
-  ]);
+  // Memories first so progress events reflect the crawl the UI labels as
+  // "Loading memories"; documents are a smaller follow-up pass.
+  const mems = await pageAllMemories(tags, onProgress);
+  const docs = await pageAllDocuments();
   const spaces = await buildSpaces(tags, docs, mems);
   return { tags, docs, mems, spaces };
 }
@@ -335,12 +383,15 @@ export async function liveHealth() {
   };
 }
 
-export async function liveGraph(opts: {
-  containerTags?: string[];
-  includeDocuments?: boolean;
-  includeForgotten?: boolean;
-}): Promise<GraphResponse> {
-  const { tags: allTags, docs, mems: allMems } = await loadCorpus();
+export async function liveGraph(
+  opts: {
+    containerTags?: string[];
+    includeDocuments?: boolean;
+    includeForgotten?: boolean;
+  },
+  onProgress?: (progress: CorpusProgress) => void,
+): Promise<GraphResponse> {
+  const { tags: allTags, docs, mems: allMems } = await loadCorpus(onProgress);
   const tags = opts.containerTags?.length ? opts.containerTags : allTags;
   const mems = allMems.filter(
     (m) =>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useRouteParams } from "@/components/route-host";
 import {
@@ -8,11 +8,14 @@ import {
   type HoverInfo,
   type LayoutStatus,
 } from "@/components/graph/graph-canvas";
-import { GraphDetail } from "@/components/graph/graph-detail";
+import {
+  DETAIL_PANEL_GUTTER,
+  DETAIL_PANEL_WIDTH,
+  GraphDetail,
+} from "@/components/graph/graph-detail";
 import { GraphProgress } from "@/components/graph/graph-progress";
-import { GraphLegend } from "@/components/graph/graph-legend";
+import { GraphLegend, GraphSpacesFloat } from "@/components/graph/graph-legend";
 import { GraphToolbar, GraphCustomizeButton } from "@/components/graph/graph-settings-panel";
-import { Skeleton } from "@/components/ui";
 import { PageTitle } from "@/components/shell";
 import { PageTransition } from "@/components/blocks/page-transition";
 import { egoSubgraph } from "@/lib/graph/ego";
@@ -75,8 +78,11 @@ export function GraphView() {
   const [selected, setSelected] = useState<GraphNode | null>(null);
   const [hover, setHover] = useState<HoverInfo | null>(null);
   const [layout, setLayout] = useState<LayoutStatus | null>(null);
+  const [wideCanvas, setWideCanvas] = useState(false);
   const hydratedUrl = useRef(false);
   const skipNextSave = useRef(true);
+  const canvasWrapRef = useRef<HTMLDivElement>(null);
+  const fitRef = useRef<(() => void) | null>(null);
 
   const { spaces } = useSpaces();
 
@@ -109,9 +115,12 @@ export function GraphView() {
     }),
     [settings.showDocuments, settings.showForgotten],
   );
-  const { data: raw, isLoading: loading } = useGraph(graphInput, {
-    keepPreviousData: true,
-  });
+  const { data: raw, isLoading: loading, progress: fetchProgress } = useGraph(
+    graphInput,
+    {
+      keepPreviousData: true,
+    },
+  );
 
   const { data: memoryList } = useMemoryList(GRAPH_MEMORIES, {
     keepPreviousData: true,
@@ -369,7 +378,22 @@ export function GraphView() {
   };
 
   const localActive = settings.localGraph && !!selected;
-  const fitRef = useRef<(() => void) | null>(null);
+
+  // Landscape canvas: float Spaces over the plot so the bottom bar stays
+  // Nodes + Edges only. Portrait keeps Spaces inline in the bar.
+  useLayoutEffect(() => {
+    const el = canvasWrapRef.current;
+    if (!el) return;
+    const update = () => {
+      setWideCanvas(el.clientWidth > el.clientHeight);
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [displayData]);
+
+  const floatSpaces = wideCanvas && !!spaceLegend?.length;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -442,12 +466,8 @@ export function GraphView() {
       </div>
 
       <PageTransition className="relative flex min-h-0 flex-1 flex-col">
-        <div className="relative min-h-0 flex-1">
-          {loading && !displayData ? (
-            <div className="flex h-full items-center justify-center">
-              <Skeleton className="size-64 rounded-full" />
-            </div>
-          ) : displayData ? (
+        <div ref={canvasWrapRef} className="relative min-h-0 flex-1">
+          {displayData ? (
             <GraphCanvas
               data={displayData}
               settings={canvasSettings}
@@ -463,7 +483,11 @@ export function GraphView() {
           {/* Only worth a meter when the wait is perceptible; small graphs
               settle in a frame or two and a flashing bar is just noise. */}
           {loading && !displayData ? (
-            <GraphProgress phase="fetching" />
+            <GraphProgress
+              phase="fetching"
+              completed={fetchProgress?.loaded}
+              total={fetchProgress?.total}
+            />
           ) : layout?.active && layout.nodes > LAYOUT_PROGRESS_MIN_NODES ? (
             <GraphProgress
               phase="layout"
@@ -472,6 +496,18 @@ export function GraphView() {
               nodes={layout.nodes}
             />
           ) : null}
+
+          {floatSpaces && spaceLegend && (
+            <GraphSpacesFloat
+              spaces={spaceLegend}
+              style={{
+                // Clear the detail panel when a node is selected.
+                right: selected
+                  ? DETAIL_PANEL_GUTTER * 2 + DETAIL_PANEL_WIDTH
+                  : DETAIL_PANEL_GUTTER,
+              }}
+            />
+          )}
 
           {selected && (
             <GraphDetail
@@ -499,6 +535,7 @@ export function GraphView() {
           }
           showContainsEdges={settings.showContainsEdges}
           spaces={spaceLegend}
+          floatSpaces={floatSpaces}
           trailing={
             <div className="flex items-center gap-1.5">
               <GraphCustomizeButton

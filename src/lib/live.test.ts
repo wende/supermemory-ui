@@ -6,6 +6,7 @@ import {
   type ProxiedCall,
   type RemoteHandler,
 } from "@/test/route-harness";
+import { clearTagCache } from "./tags";
 import type { MemoryEntry } from "./types";
 
 type Live = typeof import("./live");
@@ -74,10 +75,17 @@ function corpusBackend(input: {
       });
     }
     if (call.url.endsWith("/v4/memories/list")) {
-      const [tag] = (call.body as { containerTags: string[] }).containerTags;
+      const body = call.body as { containerTags: string[]; page?: number; limit?: number };
+      const [tag] = body.containerTags;
+      const all = input.memoriesByTag?.[tag!] ?? [];
+      const limit = body.limit ?? 100;
+      const page = body.page ?? 1;
+      const totalItems = all.length;
+      const totalPages = Math.max(1, Math.ceil(totalItems / limit));
+      const start = (page - 1) * limit;
       return jsonResponse({
-        memoryEntries: input.memoriesByTag?.[tag!] ?? [],
-        pagination: { totalPages: 1 },
+        memoryEntries: all.slice(start, start + limit),
+        pagination: { currentPage: page, limit, totalItems, totalPages },
       });
     }
     const tag = decodeURIComponent(call.url.split("/v3/container-tags/")[1] ?? "");
@@ -85,7 +93,12 @@ function corpusBackend(input: {
   };
 }
 
-afterEach(() => restoreBackend());
+afterEach(() => {
+  restoreBackend();
+  // resolveTags caches across imports; a prior test's document tags must
+  // not decide which spaces the next crawl pages.
+  clearTagCache();
+});
 
 describe("normalizeMemoryRelations", () => {
   it("converts the live `{ targetId: relation }` map into edges", async () => {
@@ -458,5 +471,33 @@ describe("liveGraph", () => {
     const g = await live.liveGraph({ containerTags: ["sm_other"] });
     expect(g.nodes).toEqual([]);
     expect(g.edges).toEqual([]);
+  });
+
+  it("reports loaded/total while paging the memory corpus", async () => {
+    const many = Array.from({ length: 250 }, (_, i) =>
+      liveMemory({ id: `mem_page_${i}` }),
+    );
+    const paged = corpusBackend({
+      // Tags are discovered from documents; without one, resolveTags falls
+      // back to sm_project_default and the crawl never sees these memories.
+      documents: [{ id: "doc_seed", containerTags: ["sm_research"] }],
+      memoriesByTag: { sm_research: many },
+    });
+    const { live } = await loadLive(paged);
+    const seen: { loaded: number; total: number }[] = [];
+
+    const g = await live.liveGraph({ includeDocuments: false }, (p) =>
+      seen.push(p),
+    );
+
+    expect(g.nodes).toHaveLength(250);
+    expect(seen.length).toBeGreaterThan(1);
+    expect(seen[0]).toEqual({ loaded: 0, total: 250 });
+    expect(seen[1]).toEqual({ loaded: 100, total: 250 });
+    expect(seen.at(-1)).toEqual({ loaded: 250, total: 250 });
+    // Monotonic climb — the meter must never jump backwards.
+    for (let i = 1; i < seen.length; i++) {
+      expect(seen[i]!.loaded).toBeGreaterThanOrEqual(seen[i - 1]!.loaded);
+    }
   });
 });
