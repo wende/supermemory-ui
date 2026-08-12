@@ -95,6 +95,17 @@ async function readGraphStream(
   let buffer = "";
   let result: GraphResponse | undefined;
 
+  const applyEvent = (line: string) => {
+    const event = JSON.parse(line) as GraphStreamEvent;
+    if (event.type === "progress") {
+      onProgress?.({ loaded: event.loaded, total: event.total });
+    } else if (event.type === "result") {
+      result = event.data;
+    } else if (event.type === "error") {
+      throw new ApiError(500, event.error);
+    }
+  };
+
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -103,31 +114,17 @@ async function readGraphStream(
     while (newline !== -1) {
       const line = buffer.slice(0, newline).trim();
       buffer = buffer.slice(newline + 1);
-      if (line) {
-        const event = JSON.parse(line) as GraphStreamEvent;
-        if (event.type === "progress") {
-          onProgress?.({ loaded: event.loaded, total: event.total });
-        } else if (event.type === "result") {
-          result = event.data;
-        } else if (event.type === "error") {
-          throw new ApiError(500, event.error);
-        }
-      }
+      if (line) applyEvent(line);
       newline = buffer.indexOf("\n");
     }
   }
+  // Flush the decoder's internal state — a multi-byte UTF-8 character split
+  // across the last two chunks is buffered inside `decode(…, {stream:true})`
+  // until a final no-args call releases it.
+  buffer += decoder.decode();
 
   const tail = buffer.trim();
-  if (tail) {
-    const event = JSON.parse(tail) as GraphStreamEvent;
-    if (event.type === "progress") {
-      onProgress?.({ loaded: event.loaded, total: event.total });
-    } else if (event.type === "result") {
-      result = event.data;
-    } else if (event.type === "error") {
-      throw new ApiError(500, event.error);
-    }
-  }
+  if (tail) applyEvent(tail);
 
   if (!result) {
     throw new ApiError(500, "Graph stream ended without a result");

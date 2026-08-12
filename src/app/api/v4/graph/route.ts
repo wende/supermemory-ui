@@ -107,8 +107,11 @@ async function streamMockGraph(
   loaded += first.memoryEntries.length;
   send({ type: "progress", loaded, total });
 
+  // Unlike the live path, paging here is an in-memory slice, not a network
+  // call — there's no cost to cap and no reason the reported total should
+  // ever outrun what actually gets loaded, so the loop runs to totalPages.
   let page = 2;
-  while (page <= totalPages && page <= 50) {
+  while (page <= totalPages) {
     await delay(30);
     const { memoryEntries, pagination } = listMemories({
       includeForgotten: opts.includeForgotten,
