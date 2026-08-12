@@ -92,11 +92,15 @@ Or try the hosted mock immediately at
 
 ## Connect a real instance
 
-Start the memory engine, then add its server-only connection details:
+Start the memory engine against its intended persistent data directory, then add
+its server-only connection details. Do not run `supermemory-server` bare from
+this repository: its default storage location is `./.supermemory`, which creates
+a separate, empty local instance and makes the console appear to have lost its
+corpus.
 
 ```bash
 # terminal 1
-supermemory-server
+SUPERMEMORY_DATA_DIR="$HOME/.supermemory-local/data" supermemory-server
 
 # .env.local
 SUPERMEMORY_URL=http://localhost:6767
@@ -107,6 +111,11 @@ npm ci
 npm run build
 npm run start
 ```
+
+Use the same `SUPERMEMORY_DATA_DIR` on every restart. The engine API key belongs
+to that data directory, so when switching stores update `SUPERMEMORY_KEY` in
+`.env.local` to the key from the selected store. See [Local Supermemory for
+coding agents](docs/coding/README.md) for the complete provider configuration.
 
 The browser talks only to this app's `/api/*` routes. Next.js route handlers
 proxy and adapt the Memory API, so the origin and API key never reach client
@@ -122,6 +131,10 @@ SUPERMEMORY_LOCAL_DIR=~/.supermemory
 That adds the installed version, configured providers, storage path and size,
 and process uptime to the runtime panel. Provider keys are used only to identify
 which provider is configured; their values are never returned to the browser.
+
+For local coding-agent setup with MiniMax-M3, Codex, Claude Code, Cursor, the
+MCP bridge, repository-source ingestion, async-ingest verification, and the
+current v0.0.6 WASM failure, see [Local Supermemory for coding agents](docs/coding/README.md).
 
 ## How it fits together
 
