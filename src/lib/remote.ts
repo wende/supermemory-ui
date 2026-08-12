@@ -71,13 +71,26 @@ export async function proxy(
 
   const url = `${REMOTE.url}${path.startsWith("/") ? path : `/${path}`}`;
   const started = performance.now();
-  const res = await fetch(url, {
-    ...init,
-    headers,
-    cache: "no-store",
-  });
-  recordLatency(Math.round(performance.now() - started));
-  return res;
+  try {
+    const res = await fetch(url, {
+      ...init,
+      headers,
+      cache: "no-store",
+    });
+    recordLatency(Math.round(performance.now() - started));
+    return res;
+  } catch (err) {
+    // The instance is unreachable (down, wrong URL, DNS/connection failure).
+    // Answer with a synthetic error response instead of throwing, so callers
+    // that already handle a non-ok response degrade gracefully instead of
+    // crashing the route handler with an unhandled rejection.
+    recordLatency(Math.round(performance.now() - started));
+    const message = err instanceof Error ? err.message : "network error";
+    return new Response(JSON.stringify({ error: message }), {
+      status: 502,
+      headers: { "content-type": "application/json" },
+    });
+  }
 }
 
 export async function proxyJson<T = unknown>(

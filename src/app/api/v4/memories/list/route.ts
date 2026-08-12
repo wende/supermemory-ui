@@ -55,6 +55,16 @@ export async function POST(req: Request) {
       const q = b.q.toLowerCase();
       entries = entries.filter((m) => m.memory.toLowerCase().includes(q));
     }
+
+    // Each tag was fetched (and sorted) independently, so entries still sit in
+    // per-space blocks — merge them into a single list sorted the same way a
+    // single-space query would be.
+    const sortKey = b.sort ?? "updatedAt";
+    const dir = b.order === "asc" ? 1 : -1;
+    entries.sort((a, c) =>
+      a[sortKey] < c[sortKey] ? -dir : a[sortKey] > c[sortKey] ? dir : 0,
+    );
+
     const limit = b.limit ?? 25;
     const page = b.page ?? 1;
     const total = b.documentId ? entries.length : totalItems || entries.length;

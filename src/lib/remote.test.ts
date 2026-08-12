@@ -169,6 +169,19 @@ describe("proxy", () => {
     expect(new Headers(init.headers).has("content-type")).toBe(false);
   });
 
+  it("answers a network failure with a 502 instead of throwing", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.reject(new Error("connect ECONNREFUSED"))),
+    );
+    const { proxy } = await loadRemote({ url: "https://engine.example.com" });
+
+    const res = await proxy("/v4/search");
+
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual({ error: "connect ECONNREFUSED" });
+  });
+
   it("does not overwrite an explicit content-type", async () => {
     const fetchMock = stubFetch();
     const { proxy } = await loadRemote({ url: "https://engine.example.com" });

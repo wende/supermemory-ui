@@ -143,6 +143,20 @@ describe("remote mode", () => {
     });
   });
 
+  it("turns an unreachable instance into a 502 instead of crashing the route", async () => {
+    stubRemoteBackend(() => {
+      throw new Error("connect ECONNREFUSED");
+    });
+    const { POST } = await import("./route");
+
+    const res = await POST(addRequest({ content: "body text" }));
+
+    expect(await readJson(res)).toMatchObject({
+      status: 502,
+      body: { error: "connect ECONNREFUSED" },
+    });
+  });
+
   it("invalidates the discovered-tag cache after a successful write", async () => {
     let listCalls = 0;
     stubRemoteBackend((call) => {
