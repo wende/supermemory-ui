@@ -149,9 +149,9 @@ describe("createLayoutJob", () => {
     expect(job.total).toBe(20);
 
     const seen: number[] = [];
-    let last: ReturnType<typeof job.step> = null;
+    let last: ReturnType<typeof job.runFor> = null;
     for (let guard = 0; guard < 100 && !job.done; guard++) {
-      last = job.step();
+      last = job.runFor(0);
       if (!last) break;
       seen.push(last.completed);
       expect(last.x.length).toBe(req.nodes.length);
@@ -165,15 +165,15 @@ describe("createLayoutJob", () => {
     // Monotonic and more than one snapshot, or there is no progress to show.
     expect(seen.length).toBeGreaterThan(1);
     expect([...seen].sort((a, b) => a - b)).toEqual(seen);
-    expect(job.step()).toBeNull();
+    expect(job.runFor(0)).toBeNull();
   });
 
   it("produces a laid-out graph, not the seed positions", () => {
     const req = request(300);
     const before = req.nodes.map((n) => ({ x: n.x, y: n.y }));
     const job = createLayoutJob(req);
-    let last = job.step();
-    while (!job.done) last = job.step() ?? last;
+    let last = job.runFor(0);
+    while (!job.done) last = job.runFor(0) ?? last;
 
     let moved = 0;
     for (let i = 0; i < before.length; i++) {
@@ -189,8 +189,8 @@ describe("createLayoutJob", () => {
     const req = request(120);
     req.nodes[10] = { ...req.nodes[10]!, fx: 77, fy: -33, x: 77, y: -33 };
     const job = createLayoutJob(req);
-    let last = job.step();
-    while (!job.done) last = job.step() ?? last;
+    let last = job.runFor(0);
+    while (!job.done) last = job.runFor(0) ?? last;
 
     expect(last!.x[10]).toBeCloseTo(77, 3);
     expect(last!.y[10]).toBeCloseTo(-33, 3);

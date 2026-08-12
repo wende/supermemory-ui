@@ -494,7 +494,10 @@ describe("liveGraph", () => {
     expect(seen.length).toBeGreaterThan(1);
     expect(seen[0]).toEqual({ loaded: 0, total: 250 });
     expect(seen[1]).toEqual({ loaded: 100, total: 250 });
-    expect(seen.at(-1)).toEqual({ loaded: 250, total: 250 });
+    // The document pass (one seed document here) rides the same denominator
+    // as the memory crawl, so the meter keeps moving past the memory total
+    // instead of parking at 100% while documents and spaces are assembled.
+    expect(seen.at(-1)).toEqual({ loaded: 251, total: 251 });
     // Monotonic climb — the meter must never jump backwards.
     for (let i = 1; i < seen.length; i++) {
       expect(seen[i]!.loaded).toBeGreaterThanOrEqual(seen[i - 1]!.loaded);

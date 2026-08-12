@@ -386,14 +386,25 @@ export function GraphCanvas({
     }
     ix.current.quadStale = true;
     ix.current.simActive = !p.done;
-    reportLayoutStatus({
-      active: !p.done,
-      completed: p.completed,
-      total: p.total,
-      nodes: nodes.length,
-    });
+
+    // Repainting a large graph costs several times what a settle tick does —
+    // and most of that is rasterisation, which JS timing cannot see, so a
+    // wall-clock throttle silently lets a slow renderer spend the whole build
+    // redrawing. Budgeting by progress instead bounds it at a fixed number of
+    // intermediate frames on any machine. Status reports (which drive the
+    // aria-live progress meter) ride the same gate, so a 90-tick settle on a
+    // small graph doesn't fire 90 screen-reader announcements.
+    const stride = Math.max(1, Math.ceil(p.total / LAYOUT_PREVIEW_FRAMES));
+    const onStride = p.completed - lastLayoutPaintRef.current >= stride;
 
     if (p.done) {
+      lastLayoutPaintRef.current = p.completed;
+      reportLayoutStatus({
+        active: false,
+        completed: p.completed,
+        total: p.total,
+        nodes: nodes.length,
+      });
       writePositions(nodes, positionsRef.current);
       rebuildQuad(nodes);
       onDone?.();
@@ -401,15 +412,14 @@ export function GraphCanvas({
       return;
     }
 
-    // Repainting a large graph costs several times what a settle tick does —
-    // and most of that is rasterisation, which JS timing cannot see, so a
-    // wall-clock throttle silently lets a slow renderer spend the whole build
-    // redrawing. Budgeting by progress instead bounds it at a fixed number of
-    // intermediate frames on any machine. The progress meter is plain DOM and
-    // keeps updating on every slice regardless.
-    const stride = Math.max(1, Math.ceil(p.total / LAYOUT_PREVIEW_FRAMES));
-    if (p.completed - lastLayoutPaintRef.current >= stride) {
+    if (onStride) {
       lastLayoutPaintRef.current = p.completed;
+      reportLayoutStatus({
+        active: true,
+        completed: p.completed,
+        total: p.total,
+        nodes: nodes.length,
+      });
       requestDraw();
     }
   };

@@ -58,9 +58,6 @@ export type LayoutProgress = {
   done: boolean;
 };
 
-/** Ticks per slice when the caller does not impose a time budget. */
-const DEFAULT_SLICE = 4;
-
 /**
  * A settle in progress. Ticks are pulled by the caller, which owns the yield
  * policy — so the same job can be drained in one go for a small graph or
@@ -70,8 +67,6 @@ export type LayoutJob = {
   readonly runId: number;
   readonly total: number;
   readonly done: boolean;
-  /** Run a fixed number of ticks, then snapshot. Null when already finished. */
-  step(ticks?: number): LayoutProgress | null;
   /**
    * Tick until `budgetMs` is spent, then snapshot. Always runs at least one
    * tick, so a graph whose single tick overruns the budget still progresses.
@@ -79,24 +74,35 @@ export type LayoutJob = {
   runFor(budgetMs: number): LayoutProgress | null;
 };
 
-function snapshot(
-  runId: number,
-  nodes: SimNode[],
-  runner: SettleRunner,
-): LayoutProgress {
-  const x = new Float32Array(nodes.length);
-  const y = new Float32Array(nodes.length);
-  for (let i = 0; i < nodes.length; i++) {
-    x[i] = nodes[i]!.x;
-    y[i] = nodes[i]!.y;
-  }
+/**
+ * Reusable position buffers for one job's snapshots. A settle emits ~30
+ * slices on a large graph; allocating a fresh pair of Float32Arrays each time
+ * only to discard the previous one churns hundreds of KB per build for no
+ * reason, since each snapshot is consumed synchronously by the caller before
+ * the next tick runs.
+ */
+function createSnapshotBuffers(size: number) {
+  let x = new Float32Array(size);
+  let y = new Float32Array(size);
   return {
-    runId,
-    completed: runner.completed,
-    total: runner.total,
-    x,
-    y,
-    done: runner.done,
+    take(runId: number, nodes: SimNode[], runner: SettleRunner): LayoutProgress {
+      if (x.length !== nodes.length) {
+        x = new Float32Array(nodes.length);
+        y = new Float32Array(nodes.length);
+      }
+      for (let i = 0; i < nodes.length; i++) {
+        x[i] = nodes[i]!.x;
+        y[i] = nodes[i]!.y;
+      }
+      return {
+        runId,
+        completed: runner.completed,
+        total: runner.total,
+        x,
+        y,
+        done: runner.done,
+      };
+    },
   };
 }
 
@@ -137,6 +143,7 @@ export function createLayoutJob(req: LayoutRequest): LayoutJob {
     ticks: req.ticks,
     alpha: req.alpha,
   });
+  const buffers = createSnapshotBuffers(nodes.length);
 
   return {
     runId: req.runId,
@@ -144,18 +151,13 @@ export function createLayoutJob(req: LayoutRequest): LayoutJob {
     get done() {
       return runner.done;
     },
-    step(ticks = DEFAULT_SLICE) {
-      if (runner.done) return null;
-      runner.advance(ticks);
-      return snapshot(req.runId, nodes, runner);
-    },
     runFor(budgetMs: number) {
       if (runner.done) return null;
       const started = now();
       do {
         runner.advance(1);
       } while (!runner.done && now() - started < budgetMs);
-      return snapshot(req.runId, nodes, runner);
+      return buffers.take(req.runId, nodes, runner);
     },
   };
 }

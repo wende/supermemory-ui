@@ -28,7 +28,9 @@ export function GraphProgress({
   className?: string;
 }) {
   const ratio = total > 0 ? Math.min(1, Math.max(0, completed / total)) : 0;
-  const pct = Math.round(ratio * 100);
+  // Coarsened to 2% steps so the aria-live region only announces on
+  // meaningful progress changes, not every settle tick or fetched page.
+  const pct = Math.round(ratio * 50) * 2;
 
   const label =
     phase === "fetching"

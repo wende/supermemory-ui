@@ -81,8 +81,11 @@ export async function GET(req: Request) {
 /**
  * Mock corpus is in-process, but we still page `listMemories` so the
  * progress meter moves through real loaded/total counts instead of a
- * spinner. The final assemble is the same sync `graph()` used by the
- * non-streaming path.
+ * spinner. The final assemble is the same sync, in-memory `graph()` used by
+ * the non-streaming path — unlike the live path there is no document fetch
+ * or network round trip after the last memory page, so there is no second
+ * phase worth reporting: the meter reaching 100% and the `result` line
+ * arrive in the same tick.
  */
 async function streamMockGraph(
   opts: GraphOpts,

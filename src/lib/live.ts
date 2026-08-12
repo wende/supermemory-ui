@@ -26,7 +26,9 @@ import type {
 /** How far through the remote memory crawl a graph build has gotten. */
 export type CorpusProgress = { loaded: number; total: number };
 
-async function pageAllDocuments(): Promise<Document[]> {
+async function pageAllDocuments(
+  onProgress?: (progress: CorpusProgress) => void,
+): Promise<Document[]> {
   const out: Document[] = [];
   let page = 1;
   let totalPages = 1;
@@ -38,6 +40,8 @@ async function pageAllDocuments(): Promise<Document[]> {
     if (!ok || !data?.memories) break;
     out.push(...data.memories);
     totalPages = data.pagination?.totalPages ?? 1;
+    const total = data.pagination?.totalItems ?? out.length;
+    onProgress?.({ loaded: out.length, total: Math.max(total, out.length) });
     page += 1;
   }
   return out;
@@ -213,9 +217,18 @@ async function buildSpaces(
 async function loadCorpus(onProgress?: (progress: CorpusProgress) => void) {
   const tags = await resolveTags();
   // Memories first so progress events reflect the crawl the UI labels as
-  // "Loading memories"; documents are a smaller follow-up pass.
+  // "Loading memories"; documents are a smaller follow-up pass. Both phases
+  // share one denominator (memory count + document count) so the meter keeps
+  // climbing through the document pass instead of parking at 100% while
+  // `pageAllDocuments` — and then `buildSpaces` — are still working.
   const mems = await pageAllMemories(tags, onProgress);
-  const docs = await pageAllDocuments();
+  const memTotal = mems.length;
+  const docs = await pageAllDocuments((p) =>
+    onProgress?.({
+      loaded: memTotal + p.loaded,
+      total: memTotal + Math.max(p.total, p.loaded),
+    }),
+  );
   const spaces = await buildSpaces(tags, docs, mems);
   return { tags, docs, mems, spaces };
 }
