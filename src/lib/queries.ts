@@ -10,6 +10,7 @@
  * derived view stale, and each tab picks the refresh up when it is next shown.
  */
 
+import { useEffect, useRef, useState } from "react";
 import { api, type Stats } from "./api";
 import { spaceDisplayName } from "./format";
 import { fetchQuery, invalidateQueries, queryKey, useQuery, type UseQueryOptions } from "./query";
@@ -152,11 +153,35 @@ export function useProfile(input: ProfileInput, options?: UseQueryOptions) {
 }
 
 export function useGraph(input: GraphInput, options?: UseQueryOptions) {
-  return useQuery<GraphResponse>(
+  const [progress, setProgress] = useState<{
+    loaded: number;
+    total: number;
+  } | null>(null);
+  const progressRef = useRef(setProgress);
+
+  useEffect(() => {
+    progressRef.current = setProgress;
+    return () => {
+      // Drop updates from an in-flight fetch after unmount.
+      progressRef.current = () => {};
+    };
+  }, []);
+
+  const query = useQuery<GraphResponse>(
     queryKey(KEY.graph, input),
-    () => api.graph(input),
+    () =>
+      api.graph(input, {
+        onProgress: (next) => progressRef.current(next),
+      }),
     options,
   );
+
+  // Clear the meter once we have a payload (or the fetch failed).
+  useEffect(() => {
+    if (!query.isFetching) setProgress(null);
+  }, [query.isFetching]);
+
+  return { ...query, progress };
 }
 
 /* ------------------------------------------------------------------ */
