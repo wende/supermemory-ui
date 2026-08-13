@@ -1,10 +1,19 @@
 import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { readFileSync } from "node:fs";
 import * as z from "zod";
-import { createMemory, localApi, resolveRepositorySpace } from "./lib.mjs";
+import {
+  createMemory,
+  listMemoriesAcrossSpaces,
+  localApi,
+  resolveRepositorySpace,
+} from "./lib.mjs";
 
 const PORT = Number(process.env.SUPERMEMORY_MCP_PORT ?? "6768");
+const { version: PACKAGE_VERSION } = JSON.parse(
+  readFileSync(new URL("./package.json", import.meta.url), "utf8"),
+);
 // This bridge has no client authentication. Keep it loopback-only and let the
 // SDK install its localhost Host-header validation.
 const HOST = "127.0.0.1";
@@ -96,7 +105,10 @@ async function discoverSpaces() {
 }
 
 function createServer() {
-  const server = new McpServer({ name: "supermemory-local", version: "0.4.0" });
+  const server = new McpServer({
+    name: "supermemory-local",
+    version: PACKAGE_VERSION,
+  });
 
   server.registerTool(
     "search_memory",
@@ -205,35 +217,13 @@ function createServer() {
     async ({ containerTag, page = 1, limit = 20, includeForgotten = false }) => {
       try {
         const tags = containerTag ? [containerTag] : (await discoverSpaces()).map((space) => space.containerTag);
-        const responses = await Promise.all(
-          tags.map((tag) => localApi("/v4/memories/list", {
-            containerTags: [tag],
-            page,
-            limit,
-            includeForgotten,
-            sort: "updatedAt",
-            order: "desc",
-          })),
-        );
-        const entries = responses
-          .flatMap((response) => response.memoryEntries ?? [])
-          .filter((entry) => includeForgotten || !entry.isForgotten)
-          .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
-          .slice(0, limit);
-        const totalItems = responses.reduce(
-          (sum, response) => sum + (response.pagination?.totalItems ?? response.memoryEntries?.length ?? 0),
-          0,
-        );
-        return result({
-          memoryEntries: entries,
-          pagination: {
-            currentPage: page,
-            limit,
-            totalItems,
-            totalPages: Math.max(1, Math.ceil(totalItems / limit)),
-          },
-          spacesSearched: tags,
-        });
+        return result(await listMemoriesAcrossSpaces({
+          containerTag,
+          tags,
+          page,
+          limit,
+          includeForgotten,
+        }));
       } catch (error) {
         return result({ error: error instanceof Error ? error.message : String(error) }, true);
       }

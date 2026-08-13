@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 import test from "node:test";
 import {
   createMemory,
+  listMemoriesAcrossSpaces,
   localApi,
   normalizeGitRemote,
   resolveRepositorySpace,
@@ -90,6 +91,75 @@ test("localApi reports non-success responses with bounded context", async () => 
     }),
     /Local API \/v4\/search returned 401: unauthorized/,
   );
+});
+
+test("listMemoriesAcrossSpaces paginates the merged global timeline", async () => {
+  const calls = [];
+  const entries = {
+    space_a: [
+      { id: "a-new", updatedAt: "2026-08-13T09:00:00Z" },
+      { id: "a-old", updatedAt: "2026-08-13T01:00:00Z" },
+    ],
+    space_b: [
+      { id: "b-new", updatedAt: "2026-08-13T08:00:00Z" },
+      { id: "b-old", updatedAt: "2026-08-13T07:00:00Z" },
+    ],
+  };
+  const result = await listMemoriesAcrossSpaces({
+    tags: ["space_a", "space_b"],
+    page: 2,
+    limit: 2,
+    request: async (path, body) => {
+      calls.push({ path, body });
+      const memoryEntries = entries[body.containerTags[0]];
+      return {
+        memoryEntries,
+        pagination: { totalItems: memoryEntries.length, totalPages: 1 },
+      };
+    },
+  });
+
+  assert.deepEqual(
+    result.memoryEntries.map((entry) => entry.id),
+    ["b-old", "a-old"],
+  );
+  assert.deepEqual(
+    calls.map(({ body }) => ({ page: body.page, limit: body.limit })),
+    [
+      { page: 1, limit: 4 },
+      { page: 1, limit: 4 },
+    ],
+  );
+  assert.deepEqual(result.pagination, {
+    currentPage: 2,
+    limit: 2,
+    totalItems: 4,
+    totalPages: 2,
+  });
+});
+
+test("listMemoriesAcrossSpaces preserves native paging for one space", async () => {
+  let requestBody;
+  const result = await listMemoriesAcrossSpaces({
+    containerTag: "space_a",
+    tags: ["space_a"],
+    page: 3,
+    limit: 10,
+    request: async (_path, body) => {
+      requestBody = body;
+      return {
+        memoryEntries: [{ id: "page-three", updatedAt: "2026-08-13" }],
+        pagination: { totalItems: 21, totalPages: 3 },
+      };
+    },
+  });
+
+  assert.equal(requestBody.page, 3);
+  assert.equal(requestBody.limit, 10);
+  assert.deepEqual(result.memoryEntries.map((entry) => entry.id), [
+    "page-three",
+  ]);
+  assert.equal(result.pagination.totalItems, 21);
 });
 
 test("resolveRepositorySpace uses the normalized origin asynchronously", async (t) => {

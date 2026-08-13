@@ -57,6 +57,117 @@ export async function createMemory(
   );
 }
 
+function memoryListRequest(tag, page, limit, includeForgotten) {
+  return {
+    containerTags: [tag],
+    page,
+    limit,
+    includeForgotten,
+    sort: "updatedAt",
+    order: "desc",
+  };
+}
+
+async function fetchMemoryPrefix(
+  tag,
+  count,
+  includeForgotten,
+  request,
+) {
+  const pageSize = Math.min(100, count);
+  const first = await request(
+    "/v4/memories/list",
+    memoryListRequest(tag, 1, pageSize, includeForgotten),
+  );
+  const totalItems =
+    first.pagination?.totalItems ?? first.memoryEntries?.length ?? 0;
+  const totalPages =
+    first.pagination?.totalPages ?? Math.max(1, Math.ceil(totalItems / pageSize));
+  const pagesNeeded = Math.min(totalPages, Math.ceil(count / pageSize));
+  const remaining = await Promise.all(
+    Array.from({ length: Math.max(0, pagesNeeded - 1) }, (_, index) =>
+      request(
+        "/v4/memories/list",
+        memoryListRequest(tag, index + 2, pageSize, includeForgotten),
+      ),
+    ),
+  );
+
+  return {
+    entries: [first, ...remaining]
+      .flatMap((response) => response.memoryEntries ?? [])
+      .slice(0, count),
+    totalItems,
+  };
+}
+
+export async function listMemoriesAcrossSpaces({
+  containerTag,
+  tags,
+  page = 1,
+  limit = 20,
+  includeForgotten = false,
+  request = localApi,
+}) {
+  if (tags.length === 0) {
+    return {
+      memoryEntries: [],
+      pagination: {
+        currentPage: page,
+        limit,
+        totalItems: 0,
+        totalPages: 1,
+      },
+      spacesSearched: [],
+    };
+  }
+
+  let responses;
+  let windowStart = 0;
+  if (containerTag) {
+    const response = await request(
+      "/v4/memories/list",
+      memoryListRequest(containerTag, page, limit, includeForgotten),
+    );
+    responses = [
+      {
+        entries: response.memoryEntries ?? [],
+        totalItems:
+          response.pagination?.totalItems ?? response.memoryEntries?.length ?? 0,
+      },
+    ];
+  } else {
+    const windowEnd = page * limit;
+    responses = await Promise.all(
+      tags.map((tag) =>
+        fetchMemoryPrefix(tag, windowEnd, includeForgotten, request),
+      ),
+    );
+    windowStart = (page - 1) * limit;
+  }
+
+  const memoryEntries = responses
+    .flatMap((response) => response.entries)
+    .filter((entry) => includeForgotten || !entry.isForgotten)
+    .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
+    .slice(windowStart, windowStart + limit);
+  const totalItems = responses.reduce(
+    (sum, response) => sum + response.totalItems,
+    0,
+  );
+
+  return {
+    memoryEntries,
+    pagination: {
+      currentPage: page,
+      limit,
+      totalItems,
+      totalPages: Math.max(1, Math.ceil(totalItems / limit)),
+    },
+    spacesSearched: tags,
+  };
+}
+
 function sha256(input) {
   return createHash("sha256").update(input).digest("hex").slice(0, 16);
 }
