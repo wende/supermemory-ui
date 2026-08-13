@@ -169,6 +169,38 @@ describe("proxy", () => {
     expect(new Headers(init.headers).has("content-type")).toBe(false);
   });
 
+  it("answers a network failure with a 502 instead of throwing", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.reject(new TypeError("connect ECONNREFUSED"))),
+    );
+    const { proxy } = await loadRemote({ url: "https://engine.example.com" });
+
+    const res = await proxy("/v4/search");
+
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual({
+      error: "connect ECONNREFUSED",
+      code: "upstream_unreachable",
+    });
+  });
+
+  it("does not turn an aborted request into an upstream 502", async () => {
+    const aborted = new DOMException("This operation was aborted", "AbortError");
+    vi.stubGlobal("fetch", vi.fn(() => Promise.reject(aborted)));
+    const { proxy } = await loadRemote({ url: "https://engine.example.com" });
+
+    await expect(proxy("/v4/search")).rejects.toBe(aborted);
+  });
+
+  it("rethrows unexpected non-network failures", async () => {
+    const unexpected = new Error("broken fetch wrapper");
+    vi.stubGlobal("fetch", vi.fn(() => Promise.reject(unexpected)));
+    const { proxy } = await loadRemote({ url: "https://engine.example.com" });
+
+    await expect(proxy("/v4/search")).rejects.toBe(unexpected);
+  });
+
   it("does not overwrite an explicit content-type", async () => {
     const fetchMock = stubFetch();
     const { proxy } = await loadRemote({ url: "https://engine.example.com" });

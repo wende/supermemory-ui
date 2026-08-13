@@ -122,7 +122,7 @@ describe("remote mode", () => {
 
   it("turns a transport failure into a 502", async () => {
     stubRemoteBackend(() => {
-      throw new Error("connect ECONNREFUSED");
+      throw new TypeError("connect ECONNREFUSED");
     });
     const { GET } = await import("./route");
 
