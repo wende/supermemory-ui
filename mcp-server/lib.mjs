@@ -5,6 +5,7 @@ import { basename, dirname, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 
 const execFile = promisify(execFileCallback);
+const GIT_TIMEOUT_MS = 5_000;
 
 export async function localApi(
   path,
@@ -72,6 +73,7 @@ function sanitizeRepoName(name) {
 async function git(directory, args) {
   const { stdout } = await execFile("git", ["-C", directory, ...args], {
     encoding: "utf8",
+    timeout: GIT_TIMEOUT_MS,
   });
   return stdout.trim();
 }

@@ -5,13 +5,15 @@ import * as z from "zod";
 import { createMemory, localApi, resolveRepositorySpace } from "./lib.mjs";
 
 const PORT = Number(process.env.SUPERMEMORY_MCP_PORT ?? "6768");
-const HOST = process.env.SUPERMEMORY_MCP_HOST ?? "127.0.0.1";
+// This bridge has no client authentication. Keep it loopback-only and let the
+// SDK install its localhost Host-header validation.
+const HOST = "127.0.0.1";
 function result(data, isError = false) {
   return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }], ...(isError ? { isError: true } : {}) };
 }
 
 async function ingestDocument({ content, containerTag, sourcePath, title, customId, source }) {
-  return localApi("/v3/documents", {
+  const response = await localApi("/v3/documents", {
     content,
     containerTag,
     ...(customId ? { customId } : {}),
@@ -22,9 +24,19 @@ async function ingestDocument({ content, containerTag, sourcePath, title, custom
       ...(title ? { title } : {}),
     },
   });
+  invalidateSpacesCache();
+  return response;
 }
 
-async function discoverSpaces() {
+const SPACES_CACHE_TTL_MS = 15_000;
+let spacesCache = null;
+let spacesInFlight = null;
+
+function invalidateSpacesCache() {
+  spacesCache = null;
+}
+
+async function loadSpaces() {
   const spaces = new Map();
   let page = 1;
   let totalPages = 1;
@@ -64,6 +76,23 @@ async function discoverSpaces() {
     }),
   );
   return entries.sort((a, b) => a.containerTag.localeCompare(b.containerTag));
+}
+
+async function discoverSpaces() {
+  if (spacesCache && Date.now() - spacesCache.cachedAt < SPACES_CACHE_TTL_MS) {
+    return spacesCache.entries;
+  }
+  if (spacesInFlight) return spacesInFlight;
+
+  spacesInFlight = loadSpaces()
+    .then((entries) => {
+      spacesCache = { cachedAt: Date.now(), entries };
+      return entries;
+    })
+    .finally(() => {
+      spacesInFlight = null;
+    });
+  return spacesInFlight;
 }
 
 function createServer() {
@@ -311,7 +340,7 @@ function createServer() {
   return server;
 }
 
-const app = createMcpExpressApp();
+const app = createMcpExpressApp({ host: HOST });
 
 app.post("/mcp", async (req, res) => {
   try {
