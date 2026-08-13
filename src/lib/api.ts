@@ -77,6 +77,61 @@ function safeParse(text: string): unknown {
   }
 }
 
+type GraphStreamEvent =
+  | { type: "progress"; loaded: number; total: number }
+  | { type: "result"; data: GraphResponse }
+  | { type: "error"; error: string };
+
+/**
+ * Consume the graph route's NDJSON stream: progress lines as memories are
+ * paged, then a final result. Throws on a stream-level error event.
+ */
+async function readGraphStream(
+  body: ReadableStream<Uint8Array>,
+  onProgress?: (progress: { loaded: number; total: number }) => void,
+): Promise<GraphResponse> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let result: GraphResponse | undefined;
+
+  const applyEvent = (line: string) => {
+    const event = JSON.parse(line) as GraphStreamEvent;
+    if (event.type === "progress") {
+      onProgress?.({ loaded: event.loaded, total: event.total });
+    } else if (event.type === "result") {
+      result = event.data;
+    } else if (event.type === "error") {
+      throw new ApiError(500, event.error);
+    }
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let newline = buffer.indexOf("\n");
+    while (newline !== -1) {
+      const line = buffer.slice(0, newline).trim();
+      buffer = buffer.slice(newline + 1);
+      if (line) applyEvent(line);
+      newline = buffer.indexOf("\n");
+    }
+  }
+  // Flush the decoder's internal state — a multi-byte UTF-8 character split
+  // across the last two chunks is buffered inside `decode(…, {stream:true})`
+  // until a final no-args call releases it.
+  buffer += decoder.decode();
+
+  const tail = buffer.trim();
+  if (tail) applyEvent(tail);
+
+  if (!result) {
+    throw new ApiError(500, "Graph stream ended without a result");
+  }
+  return result;
+}
+
 /* ------------------------------------------------------------------ */
 
 export interface Stats {
@@ -282,13 +337,38 @@ export const api = {
     ),
 
   /* graph --------------------------------------------------------- */
-  graph: (opts: { containerTags?: string[]; documents?: boolean; forgotten?: boolean } = {}) => {
+  graph: async (
+    opts: {
+      containerTags?: string[];
+      documents?: boolean;
+      forgotten?: boolean;
+    } = {},
+    options?: {
+      onProgress?: (progress: { loaded: number; total: number }) => void;
+    },
+  ) => {
     const p = new URLSearchParams();
     if (opts.containerTags?.length) p.set("containerTags", opts.containerTags.join(","));
     if (opts.documents === false) p.set("documents", "false");
     if (opts.forgotten) p.set("forgotten", "true");
+    // Always stream so the graph view can show loaded/total while the
+    // server pages the corpus. Non-stream JSON remains available without
+    // `stream=1` for explorers.
+    p.set("stream", "1");
     const qs = p.toString();
-    return call<GraphResponse>(`/v4/graph${qs ? `?${qs}` : ""}`);
+    const res = await fetch(`${BASE}/v4/graph?${qs}`, { cache: "no-store" });
+    if (!res.ok) {
+      const text = await res.text();
+      const parsed = text ? safeParse(text) : null;
+      const msg =
+        (parsed as { error?: string } | null)?.error ??
+        `${res.status} ${res.statusText}`;
+      throw new ApiError(res.status, msg, (parsed as { code?: string } | null)?.code);
+    }
+    if (!res.body) {
+      throw new ApiError(res.status, "Graph stream returned no body");
+    }
+    return readGraphStream(res.body, options?.onProgress);
   },
 
   /** Raw passthrough for the API explorer. */
