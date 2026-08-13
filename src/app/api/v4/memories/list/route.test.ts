@@ -112,4 +112,35 @@ describe("POST /api/v4/memories/list (remote, multiple spaces)", () => {
 
     expect(body.memoryEntries.map((m) => m.id)).toEqual(["b1", "a1"]);
   });
+
+  it("sorts malformed entries without timestamps after valid entries", async () => {
+    stubRemoteBackend((call) => {
+      const body = call.body as { containerTags: string[] };
+      const tag = body.containerTags[0];
+      const memory = entry(
+        tag === "sm_a" ? "valid" : "missing",
+        "2026-08-10T00:00:00.000Z",
+        tag,
+      );
+      if (tag === "sm_b") {
+        // Runtime responses can be older or heterogeneous even though the
+        // current TypeScript contract requires this field.
+        delete (memory as Partial<MemoryEntry>).updatedAt;
+      }
+      return jsonResponse({
+        memoryEntries: [memory],
+        pagination: { currentPage: 1, limit: 100, totalItems: 1, totalPages: 1 },
+      } satisfies MemoryListResponse);
+    });
+    const { POST } = await loadRoute();
+
+    const res = await POST(
+      apiRequest("/v4/memories/list", {
+        json: { containerTags: ["sm_a", "sm_b"], sort: "updatedAt" },
+      }),
+    );
+    const { body } = await readJson<MemoryListResponse>(res);
+
+    expect(body.memoryEntries.map((m) => m.id)).toEqual(["valid", "missing"]);
+  });
 });

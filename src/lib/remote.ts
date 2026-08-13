@@ -80,16 +80,24 @@ export async function proxy(
     recordLatency(Math.round(performance.now() - started));
     return res;
   } catch (err) {
+    // `fetch` uses TypeError for network-layer failures. Do not turn caller
+    // cancellation or an unexpected programming error into a misleading 502;
+    // those belong to the caller / route error boundary.
+    if (!(err instanceof TypeError)) throw err;
+
     // The instance is unreachable (down, wrong URL, DNS/connection failure).
     // Answer with a synthetic error response instead of throwing, so callers
     // that already handle a non-ok response degrade gracefully instead of
     // crashing the route handler with an unhandled rejection.
     recordLatency(Math.round(performance.now() - started));
     const message = err instanceof Error ? err.message : "network error";
-    return new Response(JSON.stringify({ error: message }), {
-      status: 502,
-      headers: { "content-type": "application/json" },
-    });
+    return new Response(
+      JSON.stringify({ error: message, code: "upstream_unreachable" }),
+      {
+        status: 502,
+        headers: { "content-type": "application/json" },
+      },
+    );
   }
 }
 

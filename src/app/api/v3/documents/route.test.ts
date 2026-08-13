@@ -145,7 +145,7 @@ describe("remote mode", () => {
 
   it("turns an unreachable instance into a 502 instead of crashing the route", async () => {
     stubRemoteBackend(() => {
-      throw new Error("connect ECONNREFUSED");
+      throw new TypeError("connect ECONNREFUSED");
     });
     const { POST } = await import("./route");
 

@@ -61,9 +61,17 @@ export async function POST(req: Request) {
     // single-space query would be.
     const sortKey = b.sort ?? "updatedAt";
     const dir = b.order === "asc" ? 1 : -1;
-    entries.sort((a, c) =>
-      a[sortKey] < c[sortKey] ? -dir : a[sortKey] > c[sortKey] ? dir : 0,
-    );
+    entries.sort((a, c) => {
+      // The API contract requires both timestamps, but keep malformed or
+      // older heterogeneous entries deterministic and at the end rather than
+      // relying on comparisons against `undefined`.
+      const aValue = typeof a[sortKey] === "string" ? a[sortKey] : null;
+      const cValue = typeof c[sortKey] === "string" ? c[sortKey] : null;
+      if (aValue === cValue) return a.id.localeCompare(c.id);
+      if (aValue === null) return 1;
+      if (cValue === null) return -1;
+      return aValue < cValue ? -dir : dir;
+    });
 
     const limit = b.limit ?? 25;
     const page = b.page ?? 1;

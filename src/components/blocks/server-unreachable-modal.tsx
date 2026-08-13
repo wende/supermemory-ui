@@ -21,8 +21,8 @@ export function ServerUnreachableModal() {
 
   const unreachable = data?.backend === "remote" && data.status !== "ok";
 
-  // A fresh failure (including one after a prior failure recovered) should
-  // reopen the dialog even if the operator dismissed an earlier one.
+  // Dismissal lasts for the current outage. Once the backend recovers, clear
+  // it so a later healthy -> unreachable transition opens the dialog again.
   useEffect(() => {
     if (!unreachable) setDismissed(false);
   }, [unreachable]);
