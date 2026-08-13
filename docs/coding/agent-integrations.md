@@ -223,10 +223,33 @@ managed service rather than the local endpoints.
 
 ## Cursor
 
-Cursor supports lifecycle hooks, but Supermemory does not currently ship an
-official Cursor capture adapter. MCP-only setup gives Cursor explicit tools,
-not automatic session ingestion. For reliable local capture, install a thin
-adapter under `~/.cursor/hooks/` and register it in
+Only the MCP setup below is ready to copy. Supermemory does not currently ship
+an official Cursor capture adapter, so MCP gives Cursor explicit tools but not
+automatic session ingestion.
+
+### MCP
+
+Add the bridge to `~/.cursor/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "supermemory-local": {
+      "url": "http://127.0.0.1:6768/mcp"
+    }
+  }
+}
+```
+
+Restart Cursor or reload its MCP configuration, then check that the server and
+tools appear in Cursor settings.
+
+### Appendix: implementing an unofficial capture adapter
+
+The remainder of this Cursor section is an implementation contract for authors
+building their own adapter, not a working setup recipe. Do not register the
+commands below until an actual `~/.cursor/hooks/supermemory.cjs` implementation
+exists. A compatible adapter would use this event routing in
 `~/.cursor/hooks.json`:
 
 ```json
@@ -255,9 +278,9 @@ adapter under `~/.cursor/hooks/` and register it in
 }
 ```
 
-`supermemory.cjs` above is an adapter contract, not a file currently bundled
-with this repository. It must implement the event behavior described below or
-wrap the equivalent Supermemory hook library functions.
+`supermemory.cjs` above is not bundled with this repository. It must implement
+the event behavior described below or wrap equivalent Supermemory hook library
+functions.
 
 User hooks run with `~/.cursor/` as their working directory, which is why the
 example uses `hooks/supermemory.cjs`. Cursor sends JSON to the command on stdin
@@ -331,23 +354,6 @@ See Cursor's current [hook reference](https://cursor.com/docs/hooks) and
 before implementing the adapter; hook input and output fields are part of the
 editor contract, not the Supermemory API.
 
-### MCP
-
-Add the bridge to `~/.cursor/mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "supermemory-local": {
-      "url": "http://127.0.0.1:6768/mcp"
-    }
-  }
-}
-```
-
-Restart Cursor or reload its MCP configuration, then check that the server and
-tools appear in Cursor settings.
-
 User-level hooks and a loopback MCP server work only for Cursor sessions
 running on this machine. Cursor cloud agents load project-level
 `.cursor/hooks.json`, not `~/.cursor/hooks.json`, and cannot reach the Mac's
@@ -360,7 +366,7 @@ network-reachable authenticated service and is outside this local setup.
 |---|---|
 | `resolve_repo_space` | Return the canonical space for a supplied local Git path |
 | `ingest_document` | Ingest already-read Markdown, source code, or text with source metadata |
-| `save_memory` | Store a short durable fact, decision, or preference |
+| `save_memory` | Create an atomic memory directly in a resolved repository space |
 | `search_memory` | Semantic/hybrid recall from the local engine's `/v4/search` endpoint |
 | `listDocuments` / `getDocument` | Browse source documents or read one stored document |
 | `listMemories` | Browse extracted memory entries, versions, and source links |

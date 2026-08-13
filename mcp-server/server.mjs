@@ -1,121 +1,13 @@
-import { createHash } from "node:crypto";
-import { execFileSync } from "node:child_process";
-import { realpathSync } from "node:fs";
-import { basename, dirname, resolve, sep } from "node:path";
 import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import * as z from "zod";
+import { createMemory, localApi, resolveRepositorySpace } from "./lib.mjs";
 
 const PORT = Number(process.env.SUPERMEMORY_MCP_PORT ?? "6768");
 const HOST = process.env.SUPERMEMORY_MCP_HOST ?? "127.0.0.1";
-const API_URL = (process.env.SUPERMEMORY_LOCAL_API_URL ?? "http://127.0.0.1:6767").replace(/\/$/, "");
-
-async function localApi(path, body, method = "POST") {
-  const response = await fetch(`${API_URL}${path}`, {
-    method,
-    headers: {
-      ...(body === undefined ? {} : { "Content-Type": "application/json" }),
-      "x-sm-source": "supermemory-local-mcp",
-    },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-  });
-  const text = await response.text();
-  if (!response.ok) throw new Error(`Local API ${path} returned ${response.status}: ${text.slice(0, 400)}`);
-  return text ? JSON.parse(text) : {};
-}
-
 function result(data, isError = false) {
   return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }], ...(isError ? { isError: true } : {}) };
-}
-
-function sha256(input) {
-  return createHash("sha256").update(input).digest("hex").slice(0, 16);
-}
-
-function sanitizeRepoName(name) {
-  const sanitized = name.toLowerCase().replace(/[^a-z0-9]/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "");
-  return sanitized.slice(0, 95).replace(/_+$/g, "") || "unknown";
-}
-
-function git(directory, args) {
-  return execFileSync("git", ["-C", directory, ...args], {
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-  }).trim();
-}
-
-function getGitRoot(directory, isolateWorktrees) {
-  if (isolateWorktrees) return git(directory, ["rev-parse", "--show-toplevel"]);
-
-  const commonDir = git(directory, ["rev-parse", "--git-common-dir"]);
-  if (commonDir === ".git") return git(directory, ["rev-parse", "--show-toplevel"]);
-
-  const commonDirPath = resolve(directory, commonDir);
-  if (basename(commonDirPath) === ".git" && !commonDirPath.includes(`${sep}.git${sep}`)) {
-    return dirname(commonDirPath);
-  }
-  return git(directory, ["rev-parse", "--show-toplevel"]);
-}
-
-function normalizeGitRemote(remoteUrl) {
-  const raw = remoteUrl.trim();
-  if (!raw) return null;
-
-  let normalized;
-  if (/^[a-z][a-z\d+.-]*:\/\//i.test(raw)) {
-    try {
-      const parsed = new URL(raw);
-      normalized = parsed.protocol === "file:"
-        ? `file:${decodeURIComponent(parsed.pathname)}`
-        : `${parsed.hostname.toLowerCase()}${parsed.port ? `:${parsed.port}` : ""}/${parsed.pathname.replace(/^\/+/, "")}`;
-    } catch {
-      normalized = raw;
-    }
-  } else {
-    const scpStyle = raw.match(/^(?:[^@/]+@)?([^:]+):(.+)$/);
-    normalized = scpStyle ? `${scpStyle[1].toLowerCase()}/${scpStyle[2]}` : `file:${resolve(raw)}`;
-  }
-
-  return normalized
-    .replace(/[?#].*$/, "")
-    .replace(/\/+$/, "")
-    .replace(/\.git$/i, "")
-    .replace(/\/{2,}/g, "/")
-    .toLowerCase();
-}
-
-function resolveRepositorySpace(repositoryPath, isolateWorktrees) {
-  const requestedPath = resolve(repositoryPath);
-  const basePath = getGitRoot(requestedPath, isolateWorktrees);
-  let localIdentity = basePath;
-  try {
-    localIdentity = realpathSync.native(basePath);
-  } catch {
-    // Use the Git root if resolving symlinks is unavailable.
-  }
-
-  let remoteUrl = null;
-  try {
-    remoteUrl = git(basePath, ["remote", "get-url", "origin"]);
-  } catch {
-    // A repository without an origin is intentionally scoped to its local path.
-  }
-
-  const normalizedRemote = remoteUrl ? normalizeGitRemote(remoteUrl) : null;
-  const repoName = remoteUrl
-    ? remoteUrl.replace(/\/+$/, "").replace(/\.git$/i, "").split(/[/:]/).at(-1)
-    : basename(basePath);
-  const shortName = sanitizeRepoName(repoName).slice(0, 72).replace(/_+$/g, "");
-  const identity = !isolateWorktrees && normalizedRemote ? normalizedRemote : `path:${localIdentity}`;
-
-  return {
-    containerTag: `repo_${shortName || "unknown"}__${sha256(identity)}`,
-    repositoryPath: basePath,
-    repositoryName: repoName || "unknown",
-    identitySource: !isolateWorktrees && normalizedRemote ? "origin remote" : "resolved local path",
-    ...(normalizedRemote ? { normalizedRemote } : {}),
-  };
 }
 
 async function ingestDocument({ content, containerTag, sourcePath, title, customId, source }) {
@@ -348,7 +240,7 @@ function createServer() {
     },
     async ({ repositoryPath, isolateWorktrees }) => {
       try {
-        return result(resolveRepositorySpace(repositoryPath, isolateWorktrees ?? process.env.SUPERMEMORY_ISOLATE_WORKTREES === "true"));
+        return result(await resolveRepositorySpace(repositoryPath, isolateWorktrees ?? process.env.SUPERMEMORY_ISOLATE_WORKTREES === "true"));
       } catch (error) {
         return result({ error: error instanceof Error ? error.message : String(error) }, true);
       }
@@ -381,15 +273,16 @@ function createServer() {
     "save_memory",
     {
       title: "Save local memory",
-      description: "Store a durable fact, decision, preference, or short project note in local Supermemory.",
+      description: "Create one atomic, immediately searchable memory in a specific local Supermemory space. Resolve repository spaces with resolve_repo_space first.",
       inputSchema: {
         content: z.string().min(1),
-        containerTag: z.string().min(1).default("cursor_local"),
+        containerTag: z.string().min(1).describe("Target Supermemory space, e.g. repo_my_project__0123456789abcdef. Resolve via resolve_repo_space."),
+        isStatic: z.boolean().optional().describe("Mark permanent identity traits true; ordinary project facts and decisions should remain false."),
       },
     },
-    async ({ content, containerTag }) => {
+    async ({ content, containerTag, isStatic }) => {
       try {
-        return result(await ingestDocument({ content, containerTag, source: "supermemory-local-mcp" }));
+        return result(await createMemory({ content, containerTag, isStatic }));
       } catch (error) {
         return result({ error: error instanceof Error ? error.message : String(error) }, true);
       }

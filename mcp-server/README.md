@@ -25,12 +25,15 @@ there is no hosted account or active-space state in this local bridge.
 cd mcp-server
 npm install
 
+SUPERMEMORY_API_KEY=sm_your_local_key \
 SUPERMEMORY_LOCAL_API_URL=http://127.0.0.1:6767 \
 node server.mjs
 ```
 
-The bridge listens only on `127.0.0.1:6768` by default. Configure your MCP
-client with its endpoint and no authentication header:
+`SUPERMEMORY_API_KEY` is the local engine key printed on first boot; the bridge
+forwards it as a bearer token to port `6767`. The bridge listens only on
+`127.0.0.1:6768` by default. Configure your MCP client with its endpoint and no
+authentication header:
 
 ```json
 {

@@ -31,7 +31,13 @@ curl -fL -o /tmp/supermemory-server \
 curl -fsSL -o /tmp/supermemory-server.sha256 \
   https://github.com/supermemoryai/supermemory/releases/download/server-v0.0.7-rc.2/supermemory-server-darwin-arm64.sha256
 
-test "$(shasum -a 256 /tmp/supermemory-server | awk '{print $1}')" = "$(awk '{print $1}' /tmp/supermemory-server.sha256)"
+expected_sha="$(awk '{print $1}' /tmp/supermemory-server.sha256)"
+if command -v sha256sum >/dev/null 2>&1; then
+  actual_sha="$(sha256sum /tmp/supermemory-server | awk '{print $1}')"
+else
+  actual_sha="$(shasum -a 256 /tmp/supermemory-server | awk '{print $1}')"
+fi
+test "$actual_sha" = "$expected_sha"
 install -m 755 /tmp/supermemory-server ~/.supermemory/bin/supermemory-server
 ```
 

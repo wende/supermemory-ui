@@ -7,6 +7,9 @@
   "engines": {
     "node": ">=20"
   },
+  "scripts": {
+    "test": "node --test lib.test.mjs"
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
     "express": "^5.2.1",
