@@ -2,7 +2,7 @@ import { body, delay, ok } from "@/lib/http";
 import { normalizeMemoryEntry } from "@/lib/live";
 import { proxyJson, wantsRemote } from "@/lib/remote";
 import { resolveTags } from "@/lib/tags";
-import { listMemories } from "@/lib/store";
+import { compareMemoryEntries, listMemories } from "@/lib/store";
 import type { MemoryEntry, MemoryListResponse } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -13,11 +13,20 @@ export async function POST(req: Request) {
   if (wantsRemote(req)) {
     const tags =
       b.containerTags?.length ? b.containerTags : await resolveTags();
+    const limit = b.limit ?? 25;
+    const page = b.page ?? 1;
+    const sortKey = b.sort === "createdAt" ? "createdAt" : "updatedAt";
+    const mergeSpaces = tags.length > 1 && !b.documentId;
     // When filtering by document, pull a wider page — the live API has no
-    // documentId param, so we filter client-side after the fetch.
+    // documentId param, so we filter client-side after the fetch. For several
+    // spaces, fetch each prefix needed for the requested global page; fetching
+    // page N independently from every space cannot produce page N of the
+    // merged timeline.
     const fetchLimit = b.documentId
-      ? Math.max(b.limit ?? 100, 500)
-      : (b.limit ?? 100);
+      ? Math.max(limit, 500)
+      : mergeSpaces
+        ? page * limit
+        : limit;
     // Fetch per tag so opaque live spaceIds can be remapped to container tags.
     const byId = new Map<string, MemoryEntry>();
     let totalItems = 0;
@@ -30,8 +39,8 @@ export async function POST(req: Request) {
             json: {
               containerTags: [tag],
               limit: fetchLimit,
-              page: b.documentId ? 1 : (b.page ?? 1),
-              sort: b.sort,
+              page: b.documentId || mergeSpaces ? 1 : page,
+              sort: sortKey,
               order: b.order,
             },
           },
@@ -59,24 +68,10 @@ export async function POST(req: Request) {
     // Each tag was fetched (and sorted) independently, so entries still sit in
     // per-space blocks — merge them into a single list sorted the same way a
     // single-space query would be.
-    const sortKey = b.sort ?? "updatedAt";
-    const dir = b.order === "asc" ? 1 : -1;
-    entries.sort((a, c) => {
-      // The API contract requires both timestamps, but keep malformed or
-      // older heterogeneous entries deterministic and at the end rather than
-      // relying on comparisons against `undefined`.
-      const aValue = typeof a[sortKey] === "string" ? a[sortKey] : null;
-      const cValue = typeof c[sortKey] === "string" ? c[sortKey] : null;
-      if (aValue === cValue) return a.id.localeCompare(c.id);
-      if (aValue === null) return 1;
-      if (cValue === null) return -1;
-      return aValue < cValue ? -dir : dir;
-    });
+    entries.sort((a, c) => compareMemoryEntries(a, c, sortKey, b.order));
 
-    const limit = b.limit ?? 25;
-    const page = b.page ?? 1;
     const total = b.documentId ? entries.length : totalItems || entries.length;
-    const slice = b.documentId
+    const slice = b.documentId || mergeSpaces
       ? entries.slice((page - 1) * limit, page * limit)
       : entries;
     return ok({

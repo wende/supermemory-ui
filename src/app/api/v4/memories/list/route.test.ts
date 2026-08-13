@@ -84,6 +84,7 @@ describe("POST /api/v4/memories/list (remote, multiple spaces)", () => {
       "a2",
       "b2",
     ]);
+    expect(body.pagination.totalItems).toBe(4);
   });
 
   it("honours order: asc across the merged, multi-space list", async () => {
@@ -142,5 +143,112 @@ describe("POST /api/v4/memories/list (remote, multiple spaces)", () => {
     const { body } = await readJson<MemoryListResponse>(res);
 
     expect(body.memoryEntries.map((m) => m.id)).toEqual(["valid", "missing"]);
+  });
+
+  it("uses one deterministic tiebreaker in remote and mock backends", async () => {
+    stubRemoteBackend((call) => {
+      const body = call.body as { containerTags: string[] };
+      const tag = body.containerTags[0];
+      return jsonResponse({
+        memoryEntries: [
+          entry(
+            tag === "sm_a" ? "z-last" : "a-first",
+            "2026-08-10T00:00:00.000Z",
+            tag,
+          ),
+        ],
+        pagination: { currentPage: 1, limit: 25, totalItems: 1, totalPages: 1 },
+      } satisfies MemoryListResponse);
+    });
+    const { POST } = await loadRoute();
+
+    const res = await POST(
+      apiRequest("/v4/memories/list", {
+        json: { containerTags: ["sm_a", "sm_b"], sort: "updatedAt" },
+      }),
+    );
+    const { body } = await readJson<MemoryListResponse>(res);
+
+    expect(body.memoryEntries.map((m) => m.id)).toEqual([
+      "a-first",
+      "z-last",
+    ]);
+  });
+
+  it("clamps unknown sort keys to updatedAt before proxying", async () => {
+    const proxiedSorts: unknown[] = [];
+    stubRemoteBackend((call) => {
+      const body = call.body as { containerTags: string[]; sort?: unknown };
+      proxiedSorts.push(body.sort);
+      const tag = body.containerTags[0];
+      return jsonResponse({
+        memoryEntries: [
+          entry(
+            tag === "sm_a" ? "older" : "newer",
+            tag === "sm_a"
+              ? "2026-08-09T00:00:00.000Z"
+              : "2026-08-10T00:00:00.000Z",
+            tag,
+          ),
+        ],
+        pagination: { currentPage: 1, limit: 25, totalItems: 1, totalPages: 1 },
+      } satisfies MemoryListResponse);
+    });
+    const { POST } = await loadRoute();
+
+    const res = await POST(
+      apiRequest("/v4/memories/list", {
+        json: { containerTags: ["sm_a", "sm_b"], sort: "memory" },
+      }),
+    );
+    const { body } = await readJson<MemoryListResponse>(res);
+
+    expect(proxiedSorts).toEqual(["updatedAt", "updatedAt"]);
+    expect(body.memoryEntries.map((m) => m.id)).toEqual(["newer", "older"]);
+  });
+
+  it("returns page two of the globally merged timeline", async () => {
+    const requests: Array<{ page: number; limit: number }> = [];
+    stubRemoteBackend((call) => {
+      const body = call.body as {
+        containerTags: string[];
+        page: number;
+        limit: number;
+      };
+      requests.push({ page: body.page, limit: body.limit });
+      const tag = body.containerTags[0];
+      return jsonResponse({
+        memoryEntries:
+          tag === "sm_a"
+            ? [
+                entry("a-new", "2026-08-13T09:00:00.000Z", tag),
+                entry("a-old", "2026-08-13T01:00:00.000Z", tag),
+              ]
+            : [
+                entry("b-new", "2026-08-13T08:00:00.000Z", tag),
+                entry("b-old", "2026-08-13T07:00:00.000Z", tag),
+              ],
+        pagination: { currentPage: 1, limit: 4, totalItems: 2, totalPages: 1 },
+      } satisfies MemoryListResponse);
+    });
+    const { POST } = await loadRoute();
+
+    const res = await POST(
+      apiRequest("/v4/memories/list", {
+        json: {
+          containerTags: ["sm_a", "sm_b"],
+          page: 2,
+          limit: 2,
+          sort: "updatedAt",
+        },
+      }),
+    );
+    const { body } = await readJson<MemoryListResponse>(res);
+
+    expect(requests).toEqual([
+      { page: 1, limit: 4 },
+      { page: 1, limit: 4 },
+    ]);
+    expect(body.memoryEntries.map((m) => m.id)).toEqual(["b-old", "a-old"]);
   });
 });
