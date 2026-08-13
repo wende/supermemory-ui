@@ -208,15 +208,102 @@ export function forceSpaceCluster(strength: number) {
   return force;
 }
 
-/** Headless pre-settle so the first painted frame is already laid out. */
-export function preSettle(
+/**
+ * Tick budget for a settle. Large graphs get fewer ticks because each tick is
+ * O(n log n); {@link alphaDecayFor} makes the shorter budget still converge.
+ */
+export function settleTicks(nodeCount: number): number {
+  if (nodeCount > 6000) return 30;
+  if (nodeCount > 3000) return 40;
+  if (nodeCount > 1500) return 55;
+  if (nodeCount > 400) return 90;
+  return 150;
+}
+
+/**
+ * Cooling schedule that lands alpha on `alphaMin` exactly at the end of the
+ * budget. d3's default decay is tuned for ~300 ticks, so a 40-tick settle used
+ * to stop while the graph was still hot — the layout looked unfinished and
+ * nodes stayed piled on top of each other. Fitting the schedule to the budget
+ * is what makes a short settle converge.
+ */
+export function alphaDecayFor(ticks: number, alphaMin = 0.001): number {
+  return 1 - Math.pow(alphaMin, 1 / Math.max(1, ticks));
+}
+
+/**
+ * Barnes-Hut opening angle. Bigger = coarser approximation = fewer quadtree
+ * nodes visited. Charge is the most expensive force by a wide margin, so large
+ * graphs trade a little accuracy for roughly a 45% cheaper tick.
+ */
+export function thetaFor(nodeCount: number): number {
+  return nodeCount > 1500 ? 1.4 : 0.9;
+}
+
+export type SettleOptions = {
+  /** Total ticks to run. Defaults to {@link settleTicks}. */
+  ticks?: number;
+  /** Starting temperature. Warm restarts pass a small value. */
+  alpha?: number;
+};
+
+export type SettleRunner = {
+  readonly total: number;
+  readonly completed: number;
+  readonly done: boolean;
+  /** Advance up to `n` ticks; returns ticks actually run. */
+  advance(n: number): number;
+};
+
+/**
+ * A settle split into resumable chunks so the caller controls when it yields —
+ * to a worker's message loop, or to the browser between animation frames.
+ *
+ * Collide is the second-most expensive force and only matters near the end
+ * (it resolves overlaps once the coarse shape has emerged), so it is attached
+ * partway through rather than paid for on every tick.
+ */
+export function createSettleRunner(
   sim: Simulation<SimNode, SimLink>,
   nodeCount: number,
-): void {
+  opts: SettleOptions = {},
+): SettleRunner {
+  const total = Math.max(1, opts.ticks ?? settleTicks(nodeCount));
+  const collideFrom = Math.floor(total * 0.5);
+  const collide = sim.force("collide");
+
   sim.stop();
-  sim.alpha(1);
-  const ticks = nodeCount > 3000 ? 12 : nodeCount > 1500 ? 40 : 150;
-  for (let i = 0; i < ticks; i++) sim.tick();
+  sim.alpha(opts.alpha ?? 1);
+  sim.alphaDecay(alphaDecayFor(total));
+  const charge = sim.force("charge") as {
+    theta?: (t: number) => unknown;
+  } | null;
+  charge?.theta?.(thetaFor(nodeCount));
+  sim.force("collide", null);
+
+  let completed = 0;
+
+  return {
+    total,
+    get completed() {
+      return completed;
+    },
+    get done() {
+      return completed >= total;
+    },
+    advance(n: number): number {
+      const upTo = Math.min(total, completed + Math.max(0, n));
+      let ran = 0;
+      while (completed < upTo) {
+        if (completed === collideFrom && collide) sim.force("collide", collide);
+        sim.tick();
+        completed++;
+        ran++;
+      }
+      if (completed >= total && collide) sim.force("collide", collide);
+      return ran;
+    },
+  };
 }
 
 export function writePositions(nodes: SimNode[], positions: PositionMap): void {
@@ -229,30 +316,39 @@ export function writePositions(nodes: SimNode[], positions: PositionMap): void {
   }
 }
 
-/** Stable key for node/edge membership — ignores positions and selection chrome. */
-export function graphTopologyKey(data: Pick<GraphResponse, "nodes" | "edges">): string {
-  const n = data.nodes.map((x) => x.id).sort().join("\0");
-  const e = data.edges
-    .map((x) => `${x.source}\0${x.target}\0${x.relation}`)
-    .sort()
-    .join("\0");
-  return `${n}|${e}`;
+/** FNV-1a over a string, seeded so two passes give independent hashes. */
+function hashString(s: string, seed: number): number {
+  let h = seed >>> 0;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0;
 }
 
-/** Lock nodes in place after layout so interaction does not re-animate the graph. */
-export function freezeLayout(nodes: SimNode[]): void {
-  for (const n of nodes) {
-    n.vx = 0;
-    n.vy = 0;
-    n.fx = n.x;
-    n.fy = n.y;
+/**
+ * Stable key for node/edge membership — ignores positions and selection chrome.
+ *
+ * Order-independent by construction (per-item hashes are summed), so it needs
+ * neither a sort nor the multi-megabyte joined string the sort used to build:
+ * at 3k nodes that was ~8ms and a large allocation on every data change.
+ */
+export function graphTopologyKey(
+  data: Pick<GraphResponse, "nodes" | "edges">,
+): string {
+  let a = 0;
+  let b = 0;
+  for (const n of data.nodes) {
+    a = (a + hashString(n.id, 0x811c9dc5)) >>> 0;
+    b = (b + hashString(n.id, 0x9e3779b9)) >>> 0;
   }
+  let c = 0;
+  let d = 0;
+  for (const e of data.edges) {
+    const key = `${e.source}\u0000${e.target}\u0000${e.relation}`;
+    c = (c + hashString(key, 0x811c9dc5)) >>> 0;
+    d = (d + hashString(key, 0x9e3779b9)) >>> 0;
+  }
+  return `${data.nodes.length}.${a.toString(36)}.${b.toString(36)}|${data.edges.length}.${c.toString(36)}.${d.toString(36)}`;
 }
 
-export function unfreezeLayout(nodes: SimNode[]): void {
-  for (const n of nodes) {
-    if (n.pinned) continue;
-    n.fx = null;
-    n.fy = null;
-  }
-}

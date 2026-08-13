@@ -4,7 +4,6 @@ import { useEffect, useRef } from "react";
 import { quadtree as d3Quadtree, type Quadtree } from "d3-quadtree";
 import { select } from "d3-selection";
 import { zoom as d3Zoom, zoomIdentity, type ZoomBehavior, type ZoomTransform } from "d3-zoom";
-import type { Simulation } from "d3-force";
 import {
   DETAIL_PANEL_GUTTER,
   DETAIL_PANEL_WIDTH,
@@ -13,15 +12,19 @@ import { readPalette, type ThemePalette } from "@/lib/graph/palette";
 import {
   buildSimLinks,
   buildSimNodes,
-  createSimulation,
-  freezeLayout,
   graphTopologyKey,
   isAdditiveChange,
   nodeRadius,
-  preSettle,
-  unfreezeLayout,
+  settleTicks,
   writePositions,
 } from "@/lib/graph/layout";
+import {
+  warmTicks,
+  type LayoutLinkInput,
+  type LayoutNodeInput,
+  type LayoutProgress,
+} from "@/lib/graph/layout-engine";
+import { LayoutRunner } from "@/lib/graph/layout-runner";
 import { compileColorGroups, resolveCompiledGroup } from "@/lib/graph/query";
 import {
   buildSpaceBlobs,
@@ -31,6 +34,25 @@ import {
 import { tokenForSpaceIndex } from "@/lib/graph/space-colors";
 import type { ColorGroup, ColorToken, GraphSettings, PositionMap, SimLink, SimNode } from "@/lib/graph/types";
 import type { GraphEdge, GraphResponse } from "@/lib/types";
+
+/**
+ * Intermediate frames drawn while a layout settles — enough to watch the graph
+ * take shape, few enough that redrawing does not outweigh the settle itself.
+ */
+const LAYOUT_PREVIEW_FRAMES = 8;
+
+/** Above this, zoom fits jump instead of tweening — see `fitToNodes`. */
+const FIT_ANIMATE_MAX_NODES = 1500;
+
+/** Layout progress, for the host to render while the graph builds. */
+export type LayoutStatus = {
+  active: boolean;
+  /** Settle ticks completed / budgeted. */
+  completed: number;
+  total: number;
+  /** Nodes being laid out. */
+  nodes: number;
+};
 
 export type HoverInfo = {
   id: string;
@@ -132,24 +154,30 @@ function paintArrowHead(
 }
 
 /**
- * Documents are squircles (superellipse n=4) so they read apart from
- * circular memory nodes — not sharp squares, not circles.
+ * Add a node outline to the current path — no `beginPath`, so many nodes can
+ * share one path and be filled in a single call.
+ *
+ * Documents are squircles (superellipse n=4) so they read apart from circular
+ * memory nodes — not sharp squares, not circles. The segment count follows the
+ * node's on-screen size: a squircle three pixels wide gains nothing from 48
+ * segments, and there can be hundreds of them.
  */
-function pathNodeDisk(
+function traceNodeDisk(
   ctx: CanvasRenderingContext2D,
   kind: SimNode["kind"],
   x: number,
   y: number,
   r: number,
+  screenScale: number,
 ): void {
   if (kind !== "document") {
-    ctx.beginPath();
+    ctx.moveTo(x + r, y);
     ctx.arc(x, y, r, 0, Math.PI * 2);
     return;
   }
   const n = 4;
-  const steps = 48;
-  ctx.beginPath();
+  const screenR = r * screenScale;
+  const steps = Math.max(8, Math.min(48, Math.ceil(screenR * 2)));
   for (let i = 0; i <= steps; i++) {
     const theta = (i / steps) * Math.PI * 2;
     const c = Math.cos(theta);
@@ -162,6 +190,19 @@ function pathNodeDisk(
   ctx.closePath();
 }
 
+/** Single-node convenience for the decoration rings. */
+function pathNodeDisk(
+  ctx: CanvasRenderingContext2D,
+  kind: SimNode["kind"],
+  x: number,
+  y: number,
+  r: number,
+  screenScale: number,
+): void {
+  ctx.beginPath();
+  traceNodeDisk(ctx, kind, x, y, r, screenScale);
+}
+
 export function GraphCanvas({
   data,
   settings,
@@ -169,6 +210,7 @@ export function GraphCanvas({
   selectedId,
   onSelect,
   onHoverChange,
+  onLayoutStatus,
   fitRef,
 }: {
   data: GraphResponse;
@@ -178,6 +220,7 @@ export function GraphCanvas({
   selectedId: string | null;
   onSelect: (node: SimNode | null) => void;
   onHoverChange?: (info: HoverInfo | null) => void;
+  onLayoutStatus?: (status: LayoutStatus) => void;
   fitRef?: React.MutableRefObject<(() => void) | null>;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -185,7 +228,9 @@ export function GraphCanvas({
   const positionsRef = useRef<PositionMap>(new Map());
   const nodesRef = useRef<SimNode[]>([]);
   const linksRef = useRef<SimLink[]>([]);
-  const simRef = useRef<Simulation<SimNode, SimLink> | null>(null);
+  const runnerRef = useRef<LayoutRunner | null>(null);
+  /** Tick count at the last preview repaint, for the settle frame budget. */
+  const lastLayoutPaintRef = useRef(0);
   const paletteRef = useRef<ThemePalette | null>(null);
   const settingsRef = useRef(settings);
   const spaceTokensRef = useRef(spaceTokens);
@@ -193,6 +238,7 @@ export function GraphCanvas({
   const selectedRef = useRef(selectedId);
   const onSelectRef = useRef(onSelect);
   const onHoverRef = useRef(onHoverChange);
+  const onLayoutStatusRef = useRef(onLayoutStatus);
   const zoomRef = useRef<ZoomBehavior<HTMLCanvasElement, unknown> | null>(null);
   const prevIdsRef = useRef<Set<string>>(new Set());
   const topoKeyRef = useRef<string>("");
@@ -201,6 +247,8 @@ export function GraphCanvas({
   const spaceBlobCacheRef = useRef<{
     nodes: SimNode[];
     sig: string;
+    /** Rebuild timestamp, for the refresh budget during a settle. */
+    at: number;
     blobs: ReturnType<typeof buildSpaceBlobs>;
   } | null>(null);
   const ix = useRef<Interaction>({
@@ -225,6 +273,7 @@ export function GraphCanvas({
   selectedRef.current = selectedId;
   onSelectRef.current = onSelect;
   onHoverRef.current = onHoverChange;
+  onLayoutStatusRef.current = onLayoutStatus;
   ix.current.selectedId = selectedId;
 
   const drawImplRef = useRef<() => void>(() => {});
@@ -239,7 +288,10 @@ export function GraphCanvas({
       } catch (err) {
         console.error("[graph-canvas] draw failed", err);
       }
-      if (ix.current.dirty || ix.current.simActive) {
+      // Only chase the next frame when something still wants painting. This
+      // used to also spin for the whole of `simActive`, which pinned the
+      // renderer at full rate for the entire settle.
+      if (ix.current.dirty) {
         requestDrawRef.current();
       }
     });
@@ -251,6 +303,11 @@ export function GraphCanvas({
     let max = 0;
     for (const n of nodes) max = Math.max(max, n.r);
     ix.current.maxRadius = max;
+  };
+
+  const ensureRunner = () => {
+    if (!runnerRef.current) runnerRef.current = new LayoutRunner();
+    return runnerRef.current;
   };
 
   const rebuildQuad = (nodes: SimNode[]) => {
@@ -311,55 +368,126 @@ export function GraphCanvas({
     return { x: (sx - t.x) / t.k, y: (sy - t.y) / t.k };
   };
 
-  const applyForcesFromSettings = () => {
-    const sim = simRef.current;
-    if (!sim) return;
-    const s = settingsRef.current;
-    const charge = sim.force("charge") as ReturnType<typeof import("d3-force").forceManyBody> | null;
-    const fx = sim.force("x") as ReturnType<typeof import("d3-force").forceX> | null;
-    const fy = sim.force("y") as ReturnType<typeof import("d3-force").forceY> | null;
-    const link = sim.force("link") as ReturnType<typeof import("d3-force").forceLink<SimNode, SimLink>> | null;
-    charge?.strength(-s.repelForce * 300);
-    fx?.strength(s.centerForce * 0.05);
-    fy?.strength(s.centerForce * 0.05);
-    if (link) {
-      const baseDist = 50 + s.linkDistance * 80;
-      link.distance((l) => {
-        const rel = (l as SimLink).relation;
-        const REST: Record<string, number> = {
-          contains: 1.5,
-          sources: 1,
-          extends: 0.85,
-          derives: 0.85,
-          updates: 0.85,
-        };
-        return baseDist * (REST[rel] ?? 1);
-      });
-      link.strength((l) => {
-        const src = l.source as SimNode;
-        const tgt = l.target as SimNode;
-        const degNorm =
-          1 / Math.max(1, Math.min(src.degree || 1, tgt.degree || 1));
-        const STIFF: Record<string, number> = {
-          // Hidden membership edges should not pull every node into a star.
-          contains: s.showContainsEdges ? 0.28 : 0,
-          sources: 1,
-          extends: 1,
-          derives: 1,
-          updates: 1,
-        };
-        return degNorm * s.linkForce * (STIFF[(l as SimLink).relation] ?? 1);
-      });
+  const reportLayoutStatus = (status: LayoutStatus) => {
+    onLayoutStatusRef.current?.(status);
+  };
+
+  /** Copy a settle snapshot onto the live nodes and repaint. */
+  const applyLayoutProgress = (p: LayoutProgress, onDone?: () => void) => {
+    const nodes = nodesRef.current;
+    // Snapshots are index-aligned with the set that was submitted; a length
+    // mismatch means the topology moved on and this snapshot is stale.
+    if (p.x.length !== nodes.length) return;
+    for (let i = 0; i < nodes.length; i++) {
+      const n = nodes[i]!;
+      if (n.pinned) continue;
+      n.x = p.x[i]!;
+      n.y = p.y[i]!;
     }
+    ix.current.quadStale = true;
+    ix.current.simActive = !p.done;
+
+    // Repainting a large graph costs several times what a settle tick does —
+    // and most of that is rasterisation, which JS timing cannot see, so a
+    // wall-clock throttle silently lets a slow renderer spend the whole build
+    // redrawing. Budgeting by progress instead bounds it at a fixed number of
+    // intermediate frames on any machine. Status reports (which drive the
+    // aria-live progress meter) ride the same gate, so a 90-tick settle on a
+    // small graph doesn't fire 90 screen-reader announcements.
+    const stride = Math.max(1, Math.ceil(p.total / LAYOUT_PREVIEW_FRAMES));
+    const onStride = p.completed - lastLayoutPaintRef.current >= stride;
+
+    if (p.done) {
+      lastLayoutPaintRef.current = p.completed;
+      reportLayoutStatus({
+        active: false,
+        completed: p.completed,
+        total: p.total,
+        nodes: nodes.length,
+      });
+      writePositions(nodes, positionsRef.current);
+      rebuildQuad(nodes);
+      onDone?.();
+      requestDraw();
+      return;
+    }
+
+    if (onStride) {
+      lastLayoutPaintRef.current = p.completed;
+      reportLayoutStatus({
+        active: true,
+        completed: p.completed,
+        total: p.total,
+        nodes: nodes.length,
+      });
+      requestDraw();
+    }
+  };
+
+  /**
+   * Hand the current node/link set to the layout runner and stream positions
+   * back. `warm` keeps the existing arrangement and only relaxes it, which is
+   * what slider tweaks and additive growth want.
+   */
+  const startLayout = (opts: { warm: boolean; onDone?: () => void }) => {
+    const nodes = nodesRef.current;
+    const links = linksRef.current;
+    if (!nodes.length) {
+      reportLayoutStatus({ active: false, completed: 0, total: 0, nodes: 0 });
+      opts.onDone?.();
+      return;
+    }
+
+    const payloadNodes: LayoutNodeInput[] = nodes.map((n) => ({
+      id: n.id,
+      x: n.x,
+      y: n.y,
+      r: n.r,
+      degree: n.degree,
+      spaceId: n.spaceId,
+      fx: n.pinned ? n.x : null,
+      fy: n.pinned ? n.y : null,
+    }));
+    const payloadLinks: LayoutLinkInput[] = links.map((l) => ({
+      source: typeof l.source === "object" ? l.source.id : l.source,
+      target: typeof l.target === "object" ? l.target.id : l.target,
+      relation: l.relation,
+    }));
+
+    const total = opts.warm ? warmTicks(nodes.length) : settleTicks(nodes.length);
+    lastLayoutPaintRef.current = 0;
+    ix.current.simActive = true;
+    reportLayoutStatus({
+      active: true,
+      completed: 0,
+      total,
+      nodes: nodes.length,
+    });
+
+    ensureRunner().run(
+      {
+        nodes: payloadNodes,
+        links: payloadLinks,
+        settings: settingsRef.current,
+        ticks: total,
+        alpha: opts.warm ? 0.3 : 1,
+      },
+      { onProgress: (p) => applyLayoutProgress(p, opts.onDone) },
+    );
+  };
+
+  /**
+   * Force sliders change the shape but not the membership, so the graph relaxes
+   * from where it already is rather than being laid out from scratch.
+   */
+  const applyForcesFromSettings = () => {
+    if (!nodesRef.current.length) return;
+    const s = settingsRef.current;
     for (const n of nodesRef.current) {
       n.r = nodeRadius(n, n.degree, s.nodeSize);
     }
     refreshMaxRadius(nodesRef.current);
-    unfreezeLayout(nodesRef.current);
-    // Nudge rather than scramble — slider tweaks should settle quickly.
-    sim.alpha(0.12).restart();
-    ix.current.simActive = true;
-    requestDraw();
+    startLayout({ warm: true });
   };
 
   const fitAnimRef = useRef<number | null>(null);
@@ -457,7 +585,13 @@ export function GraphCanvas({
       .translate(viewW / 2 - cx * k, H / 2 - cy * k)
       .scale(k);
 
-    if (opts?.animate) animateToTransform(t, 220);
+    // A tweened fit repaints the whole scene on every frame of the tween. Past
+    // a few thousand nodes one repaint already overruns a frame, so the
+    // "animation" degrades into a long stutter — jumping straight there is
+    // both faster and calmer.
+    const animate =
+      opts?.animate && nodesRef.current.length <= FIT_ANIMATE_MAX_NODES;
+    if (animate) animateToTransform(t, 220);
     else applyTransform(t);
   };
 
@@ -583,15 +717,20 @@ export function GraphCanvas({
         .map((id) => `${id}:${tokenBySpace.get(id) ?? "s1"}`)
         .join("|");
       const cache = spaceBlobCacheRef.current;
+      // Hulls cost ~17ms at 3k nodes — far too much to redo on every frame of
+      // a settle, so while the layout is moving they refresh on a time budget
+      // and the territories simply lag the nodes slightly.
+      const nowMs = performance.now();
       const needRebuild =
         !cache ||
         cache.nodes !== nodes ||
         cache.sig !== tokenSig ||
-        ix.current.simActive;
+        (ix.current.simActive && nowMs - cache.at > 250);
       if (needRebuild) {
         spaceBlobCacheRef.current = {
           nodes,
           sig: tokenSig,
+          at: nowMs,
           blobs: buildSpaceBlobs(
             nodes,
             (id) => tokenBySpace.get(id) ?? "s1",
@@ -601,12 +740,19 @@ export function GraphCanvas({
       }
       const blobs = spaceBlobCacheRef.current!.blobs;
 
+      // The blurred fringe is by far the most expensive thing on the canvas —
+      // it rasterises a full-size gaussian per territory, which costs more per
+      // frame than a settle tick does. During a settle the hulls are chasing
+      // moving nodes anyway, so the fringe is dropped until the graph is still.
+      const blurred = !ix.current.simActive;
       for (const blob of blobs) {
         const base = palette[blob.token] ?? palette.s1;
         // One fill + gaussian blur → smooth fringe without stacked darkening.
         // Blur is in screen px so the edge stays soft at any zoom.
         ctx.save();
-        ctx.filter = `blur(${Math.max(8, 14 / Math.max(0.35, t.k))}px)`;
+        if (blurred) {
+          ctx.filter = `blur(${Math.max(8, 14 / Math.max(0.35, t.k))}px)`;
+        }
         traceSmoothHull(ctx, blob.hull, blob.pad);
         ctx.fillStyle = withAlpha(base, 0.11);
         ctx.fill();
@@ -738,47 +884,42 @@ export function GraphCanvas({
     type LabelCand = { n: SimNode; text: string; x: number; y: number; w: number; h: number };
     const labelCands: LabelCand[] = [];
 
+    /* Nodes.
+     *
+     * Grouped into one path per (fill, dimmed) pair rather than a fill call
+     * per node: at a few thousand nodes the per-call overhead dominated the
+     * frame, and every pan, zoom and hover pays for a repaint. Halos are laid
+     * down as a single pass underneath, which also stops one node's halo from
+     * punching a hole in its neighbour.
+     */
+    type NodeBatch = { color: string; dimmed: boolean; stroke: boolean; nodes: SimNode[] };
+    const nodeBatches = new Map<string, NodeBatch>();
+    const haloed: { dimmed: boolean; nodes: SimNode[] }[] = [
+      { dimmed: false, nodes: [] },
+      { dimmed: true, nodes: [] },
+    ];
+    const decorated: SimNode[] = [];
+
     for (const n of nodes) {
       if (n.x < worldL - nm || n.x > worldR + nm || n.y < worldT - nm || n.y > worldB + nm) {
         continue;
       }
       const dim = activeId ? !neighbours.has(n.id) : false;
-      ctx.globalAlpha = dim ? 0.16 : 1;
 
       let color = n.forgotten ? palette.forgotten : palette[n.kind];
       if (n.groupToken && palette[n.groupToken]) {
         color = palette[n.groupToken];
       }
 
-      pathNodeDisk(ctx, n.kind, n.x, n.y, n.r + 2 / t.k);
-      ctx.fillStyle = palette.card;
-      ctx.fill();
-
-      pathNodeDisk(ctx, n.kind, n.x, n.y, n.r);
-      if (n.forgotten) {
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 1.4 / t.k;
-        ctx.stroke();
-      } else {
-        ctx.fillStyle = color;
-        ctx.fill();
+      haloed[dim ? 1 : 0]!.nodes.push(n);
+      const key = `${color}|${dim ? 1 : 0}|${n.forgotten ? 1 : 0}`;
+      let batch = nodeBatches.get(key);
+      if (!batch) {
+        batch = { color, dimmed: dim, stroke: !!n.forgotten, nodes: [] };
+        nodeBatches.set(key, batch);
       }
-
-      if (n.pinned) {
-        pathNodeDisk(ctx, n.kind, n.x, n.y, n.r + 3.5 / t.k);
-        ctx.strokeStyle = palette.foreground;
-        ctx.lineWidth = 1.2 / t.k;
-        ctx.setLineDash([2 / t.k, 2 / t.k]);
-        ctx.stroke();
-        ctx.setLineDash([]);
-      }
-
-      if (n.id === ix.current.selectedId) {
-        pathNodeDisk(ctx, n.kind, n.x, n.y, n.r + 5 / t.k);
-        ctx.strokeStyle = palette.foreground;
-        ctx.lineWidth = 1.5 / t.k;
-        ctx.stroke();
-      }
+      batch.nodes.push(n);
+      if (n.pinned || n.id === ix.current.selectedId) decorated.push(n);
 
       const alwaysLabel =
         n.kind === "space" || (!!activeId && neighbours.has(n.id));
@@ -802,6 +943,53 @@ export function GraphCanvas({
         });
       }
     }
+
+    // Halos first, then bodies, then the per-node decorations.
+    ctx.fillStyle = palette.card;
+    for (const layer of haloed) {
+      if (!layer.nodes.length) continue;
+      ctx.globalAlpha = layer.dimmed ? 0.16 : 1;
+      ctx.beginPath();
+      for (const n of layer.nodes) {
+        traceNodeDisk(ctx, n.kind, n.x, n.y, n.r + 2 / t.k, t.k);
+      }
+      ctx.fill();
+    }
+
+    for (const batch of nodeBatches.values()) {
+      ctx.globalAlpha = batch.dimmed ? 0.16 : 1;
+      ctx.beginPath();
+      for (const n of batch.nodes) {
+        traceNodeDisk(ctx, n.kind, n.x, n.y, n.r, t.k);
+      }
+      if (batch.stroke) {
+        ctx.strokeStyle = batch.color;
+        ctx.lineWidth = 1.4 / t.k;
+        ctx.stroke();
+      } else {
+        ctx.fillStyle = batch.color;
+        ctx.fill();
+      }
+    }
+
+    for (const n of decorated) {
+      ctx.globalAlpha = activeId && !neighbours.has(n.id) ? 0.16 : 1;
+      if (n.pinned) {
+        pathNodeDisk(ctx, n.kind, n.x, n.y, n.r + 3.5 / t.k, t.k);
+        ctx.strokeStyle = palette.foreground;
+        ctx.lineWidth = 1.2 / t.k;
+        ctx.setLineDash([2 / t.k, 2 / t.k]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      if (n.id === ix.current.selectedId) {
+        pathNodeDisk(ctx, n.kind, n.x, n.y, n.r + 5 / t.k, t.k);
+        ctx.strokeStyle = palette.foreground;
+        ctx.lineWidth = 1.5 / t.k;
+        ctx.stroke();
+      }
+    }
+    ctx.globalAlpha = 1;
 
     labelCands.sort((a, b) => b.n.degree - a.n.degree);
     const placed: { x: number; y: number; w: number; h: number }[] = [];
@@ -842,7 +1030,8 @@ export function GraphCanvas({
     ctx.globalAlpha = 1;
     ctx.restore();
 
-    writePositions(nodes, positionsRef.current);
+    // Positions are persisted when a settle finishes, not per frame: writing
+    // 3k map entries every frame was pure overhead during a layout run.
     ix.current.dirty = false;
   }
   drawImplRef.current = paint;
@@ -924,56 +1113,39 @@ export function GraphCanvas({
     prevIdsRef.current = nextIds;
     topoKeyRef.current = nextKey;
 
-    simRef.current?.stop();
-    const sim = createSimulation(nodes, links, settingsRef.current);
-    simRef.current = sim;
+    // Every node already carries a settled position, so this is a filter or a
+    // membership tweak rather than a new graph — relax it rather than pay for
+    // a cold settle.
+    const allSeeded =
+      positionsRef.current.size > 0 &&
+      nodes.every((n) => positionsRef.current.has(n.id));
+    const shouldRefit =
+      !additive || grew || positionsRef.current.size === 0;
 
-    const finishStatic = () => {
-      freezeLayout(nodesRef.current);
-      writePositions(nodesRef.current, positionsRef.current);
-      ix.current.simActive = false;
-      ix.current.quadStale = true;
-      rebuildQuad(nodesRef.current);
-      requestDraw();
+    const refit = () => {
+      const id = selectedRef.current;
+      if (id) fitSelection(id);
+      else fitView();
     };
-
-    sim.on("tick", () => {
-      ix.current.simActive = true;
-      // Positions moved; the next hit-test needs a fresh index.
-      ix.current.quadStale = true;
-      requestDraw();
-    });
-    sim.on("end", finishStatic);
-
-    // Full re-layout when the visible set changes structurally; freeze when done.
-    // Additive growth gets a short settle so new nodes can find a home.
-    if (!additive || positionsRef.current.size === 0) {
-      unfreezeLayout(nodes);
-      preSettle(sim, nodes.length);
-      finishStatic();
-      sim.stop();
-    } else {
-      unfreezeLayout(nodes);
-      sim.alpha(0.12).restart();
-      ix.current.simActive = true;
-    }
-
-    if (!additive || grew || positionsRef.current.size === 0) {
-      requestAnimationFrame(() => {
-        const id = selectedRef.current;
-        if (id) fitSelection(id);
-        else fitView();
-      });
-    }
 
     ix.current.quad = null;
     ix.current.quadStale = true;
+
+    startLayout({
+      warm: additive || allSeeded,
+      onDone: shouldRefit ? refit : undefined,
+    });
+
+    // Frame the work in progress too, so a long settle is watchable instead of
+    // a graph drifting off-screen until it finishes.
+    if (shouldRefit) requestAnimationFrame(refit);
+
     requestDraw();
-    return () => {
-      sim.stop();
-      sim.on("tick", null);
-      sim.on("end", null);
-    };
+    // Deliberately no cleanup that cancels the run: this effect re-fires on
+    // every new `data` identity, including ones that leave the topology
+    // untouched and return early above. Cancelling there would abandon a
+    // settle nothing restarts, freezing the graph part-built. Starting a run
+    // already supersedes the previous one, and unmount disposes the runner.
     // showContainsEdges changes membership of force links; other settings
     // are handled by the force / display effects below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -982,8 +1154,15 @@ export function GraphCanvas({
   /* Force slider changes — brief re-layout, then freeze again.
    * showContainsEdges is intentionally omitted: the topology effect above
    * already rebuilds link membership and settles. */
+  const forcesReady = useRef(false);
   useEffect(() => {
-    if (!simRef.current) return;
+    // On mount the topology effect above has just started a settle with these
+    // very settings; relaxing again here would cancel it and leave the first
+    // layout unfinished.
+    if (!forcesReady.current) {
+      forcesReady.current = true;
+      return;
+    }
     applyForcesFromSettings();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
@@ -1180,7 +1359,8 @@ export function GraphCanvas({
         cancelAnimationFrame(ix.current.raf);
         ix.current.raf = 0;
       }
-      simRef.current?.stop();
+      runnerRef.current?.dispose();
+      runnerRef.current = null;
     };
   }, []);
 
