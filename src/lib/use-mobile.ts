@@ -3,7 +3,7 @@
 import * as React from "react";
 
 /** Matches Tailwind's `md` breakpoint — below it the shell goes single-column. */
-export const MOBILE_QUERY = "(max-width: 767px)";
+const MOBILE_QUERY = "(max-width: 767px)";
 
 /**
  * `true` while the viewport is narrower than `md`.

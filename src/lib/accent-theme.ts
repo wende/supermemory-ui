@@ -24,7 +24,7 @@ export const DEFAULT_ACCENT_THEME: AccentThemeId = "te-orange";
 
 export const ACCENT_THEME_IDS = Object.keys(ACCENT_THEMES) as AccentThemeId[];
 
-export function isAccentThemeId(value: string | null | undefined): value is AccentThemeId {
+function isAccentThemeId(value: string | null | undefined): value is AccentThemeId {
   // hasOwnProperty, not `in` — `in` also matches prototype keys ("toString",
   // "constructor", …), so a corrupted localStorage value could pass the guard
   // and end up on <html data-accent> with no matching CSS block.

@@ -13,10 +13,10 @@ import { api } from "./api";
 import type { MemoryEntry } from "./types";
 
 export const REVIEW_KEY = "supermemory-memory-review";
-export const REVIEW_VERSION = 1 as const;
+const REVIEW_VERSION = 1 as const;
 
 /** Most recent decisions kept before the oldest are pruned on write. */
-export const REVIEW_LIMIT = 500;
+const REVIEW_LIMIT = 500;
 
 export type ReviewDecision = "kept" | "discarded";
 

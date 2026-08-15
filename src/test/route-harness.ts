@@ -13,7 +13,7 @@
 
 import { vi } from "vitest";
 
-export const REMOTE_URL = "https://engine.example.com";
+const REMOTE_URL = "https://engine.example.com";
 
 export interface ProxiedCall {
   url: string;

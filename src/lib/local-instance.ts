@@ -271,7 +271,7 @@ export async function directorySize(
  * `ps` is invoked with a fixed argument list and no shell, and only runs when
  * same-machine introspection is explicitly enabled.
  */
-export async function serverUptimeSeconds(): Promise<number | null> {
+async function serverUptimeSeconds(): Promise<number | null> {
   try {
     const { execFile } = await import("node:child_process");
     const stdout = await new Promise<string>((resolve, reject) => {

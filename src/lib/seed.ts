@@ -130,7 +130,6 @@ export const SPACES: ContainerTag[] = [
   },
 ];
 
-export const SPACE_IDS = SPACES.map((s) => s.containerTag);
 
 /* ------------------------------------------------------------------ */
 /* Documents                                                           */

@@ -4,7 +4,7 @@ import { PageBody, PageTitle } from "@/components/shell";
 import { PanelCard } from "@/components/blocks/panel-card";
 import { EmptyState } from "@/components/blocks/empty-state";
 import { LoadingState } from "@/components/blocks/loading-state";
-import { Badge, Button, Input, Select, Slider, Toggle } from "@/components/ui";
+import { Button, Input, Select, Slider, Toggle } from "@/components/ui";
 import { SimilarityMeter } from "@/components/charts";
 import { Icon } from "@/components/icons";
 import { SPACES, searchResults } from "@/stories/fixtures";
