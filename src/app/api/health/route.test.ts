@@ -61,30 +61,30 @@ describe("GET /api/health", () => {
   });
 
   it("reports the live instance when the proxy answers", async () => {
-    stubRemoteBackend((call) => {
+    const calls = stubRemoteBackend((call) => {
+      if (call.url.endsWith("/v3/container-tags/list")) {
+        return new Response(
+          JSON.stringify([
+            {
+              id: "space_1",
+              name: "Live",
+              containerTag: "sm_live",
+              description: null,
+              createdAt: "2026-08-01T00:00:00.000Z",
+              updatedAt: "2026-08-01T00:00:00.000Z",
+              documentCount: 1,
+              memoryCount: 1,
+              lastActivityAt: null,
+            },
+          ]),
+          { headers: { "content-type": "application/json" } },
+        );
+      }
       if (call.url.endsWith("/v3/documents/list")) {
         return new Response(
           JSON.stringify({
             memories: [{ id: "doc_1", containerTags: ["sm_live"], type: "text", status: "done", createdAt: "2026-08-01T00:00:00.000Z" }],
-            pagination: { totalPages: 1 },
-          }),
-          { headers: { "content-type": "application/json" } },
-        );
-      }
-      if (call.url.includes("/v4/memories/list")) {
-        return new Response(
-          JSON.stringify({
-            memoryEntries: [
-              {
-                id: "mem_1",
-                memory: "live",
-                version: 1,
-                isForgotten: false,
-                createdAt: "2026-08-01T00:00:00.000Z",
-                documentIds: ["doc_1"],
-              },
-            ],
-            pagination: { totalPages: 1 },
+            pagination: { totalItems: 1, totalPages: 1 },
           }),
           { headers: { "content-type": "application/json" } },
         );
@@ -104,6 +104,7 @@ describe("GET /api/health", () => {
       baseUrl: "https://engine.example.com",
     });
     expect(body.counts).toMatchObject({ documents: 1, memories: 1, spaces: 1 });
+    expect(calls.some((call) => call.url.includes("/v4/memories/list"))).toBe(false);
   });
 
   it("degrades rather than failing when the live instance errors", async () => {

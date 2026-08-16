@@ -291,11 +291,11 @@ describe("remote mode", () => {
 
   it("fans out across discovered tags and de-duplicates the merge", async () => {
     const calls = stubRemoteBackend((call) => {
-      if (call.url.endsWith("/v3/documents/list")) {
-        return jsonResponse({
-          memories: [{ containerTags: ["sm_one", "sm_two"] }],
-          pagination: { totalPages: 1 },
-        });
+      if (call.url.endsWith("/v3/container-tags/list")) {
+        return jsonResponse([
+          { id: "space_one", containerTag: "sm_one" },
+          { id: "space_two", containerTag: "sm_two" },
+        ]);
       }
       const tag = (call.body as { containerTag: string }).containerTag;
       return jsonResponse({
@@ -352,11 +352,11 @@ describe("remote mode", () => {
 
   it("succeeds when at least one tag answers", async () => {
     stubRemoteBackend((call) => {
-      if (call.url.endsWith("/v3/documents/list")) {
-        return jsonResponse({
-          memories: [{ containerTags: ["sm_one", "sm_two"] }],
-          pagination: { totalPages: 1 },
-        });
+      if (call.url.endsWith("/v3/container-tags/list")) {
+        return jsonResponse([
+          { id: "space_one", containerTag: "sm_one" },
+          { id: "space_two", containerTag: "sm_two" },
+        ]);
       }
       const tag = (call.body as { containerTag: string }).containerTag;
       return tag === "sm_one"

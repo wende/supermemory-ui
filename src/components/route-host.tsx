@@ -14,8 +14,6 @@
  *
  *   - route chunks are imported while the browser is idle, so no tab switch
  *     waits on a network round trip for its JavaScript,
- *   - each route module can export `warm()` to preload its data into the query
- *     cache (see `src/lib/queries.ts`),
  *   - `router.prefetch` warms the App Router's own cache for the stub segment.
  *
  * Hidden frames are marked not-visible via `PageVisibleProvider`, which is what
@@ -85,9 +83,6 @@ export function RouteHost({ children }: { children: ReactNode }) {
       router.prefetch(route.path);
       route
         .load()
-        .then((module) => {
-          if (!cancelled) module.warm?.();
-        })
         .catch(() => {
           // A chunk that fails to preload is re-requested on navigation.
         })

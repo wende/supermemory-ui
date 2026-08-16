@@ -100,23 +100,15 @@ export default function SpacesView() {
                         <h3 className="text-sm font-semibold text-brand-black">{s.name}</h3>
                         <Copyable value={s.containerTag} className="mt-1 text-brand-black/40" />
                       </div>
-                      <div className="flex shrink-0 gap-1.5">
-                        {s.settings.shouldLLMFilter && <Badge tone="s2">filtered</Badge>}
-                      </div>
                     </div>
 
                     <p className="mt-3 text-xs leading-relaxed text-brand-black/55">
                       {s.description}
                     </p>
 
-                    <dl className="mt-4 grid grid-cols-3 gap-3 border-t border-brand-black/[0.06] pt-3.5">
+                    <dl className="mt-4 grid grid-cols-2 gap-3 border-t border-brand-black/[0.06] pt-3.5">
                       <Metric label="Memories" value={s.memoryCount} />
                       <Metric label="Documents" value={s.documentCount} />
-                      <Metric
-                        label="Chunk size"
-                        value={s.settings.chunkSize ?? "—"}
-                        suffix="tok"
-                      />
                     </dl>
                   </div>
 
@@ -246,17 +238,49 @@ function SpaceDrawer({
   const [exclude, setExclude] = useState("");
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [detail, setDetail] = useState<ContainerTag | null>(null);
+  const [detailError, setDetailError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!space) return;
-    setDescription(space.description);
-    setFilterPrompt(space.settings.filterPrompt ?? "");
-    setShouldFilter(!!space.settings.shouldLLMFilter);
-    setChunkSize(space.settings.chunkSize ?? 1200);
-    setInclude(space.settings.includeItems.join("\n"));
-    setExclude(space.settings.excludeItems.join("\n"));
+    if (!space) {
+      setDetail(null);
+      return;
+    }
+    let cancelled = false;
+    setDetail(null);
+    setDetailError(null);
     setConfirming(false);
+    void api
+      .getSpace(space.containerTag)
+      .then((loaded) => {
+        if (cancelled) return;
+        setDetail({
+          ...space,
+          ...loaded,
+          containerTag: space.containerTag,
+          settings: { ...space.settings, ...loaded.settings },
+        });
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setDetailError(
+          error instanceof Error ? error.message : "Could not load space settings",
+        );
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [space]);
+
+  useEffect(() => {
+    if (!detail) return;
+    setDescription(detail.description);
+    setFilterPrompt(detail.settings.filterPrompt ?? "");
+    setShouldFilter(!!detail.settings.shouldLLMFilter);
+    setChunkSize(detail.settings.chunkSize ?? 1200);
+    setInclude(detail.settings.includeItems.join("\n"));
+    setExclude(detail.settings.excludeItems.join("\n"));
+  }, [detail]);
 
   if (!space) return null;
 
@@ -274,7 +298,7 @@ function SpaceDrawer({
           <Button
             variant="primary"
             size="sm"
-            disabled={busy}
+            disabled={busy || !detail}
             onClick={async () => {
               setBusy(true);
               await api.updateSpace(space.containerTag, {
@@ -328,80 +352,97 @@ function SpaceDrawer({
         </div>
       }
     >
-      <div className="space-y-5">
-        <div>
-          <label className="label mb-2 block">Description</label>
-          <Textarea
-            rows={3}
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-          />
+      {!detail ? (
+        <div className="space-y-3">
+          {detailError ? (
+            <p className="text-xs text-[color:var(--color-critical)]">
+              {detailError}
+            </p>
+          ) : (
+            <>
+              <Skeleton className="h-24 rounded-lg" />
+              <Skeleton className="h-36 rounded-lg" />
+            </>
+          )}
         </div>
-
-        <div className="border-t border-brand-black/[0.06] pt-4">
-          <Toggle
-            checked={shouldFilter}
-            onChange={setShouldFilter}
-            label="LLM extraction filter"
-            hint="Run each chunk past the filter prompt before storing memories."
-          />
-        </div>
-
-        <div>
-          <label className="label mb-2 block">Filter prompt</label>
-          <Textarea
-            rows={4}
-            value={filterPrompt}
-            onChange={(e) => setFilterPrompt(e.target.value)}
-            disabled={!shouldFilter}
-            placeholder="Keep lasting preferences and decisions. Skip scheduling chatter and one-off logistics."
-            className={shouldFilter ? "" : "opacity-50"}
-          />
-        </div>
-
-        <div>
-          <div className="mb-2 flex items-baseline justify-between">
-            <label htmlFor="chunk" className="label">
-              Chunk size
-            </label>
-            <span className="tnum text-xs font-medium text-brand-black">{chunkSize} tokens</span>
-          </div>
-          <input
-            id="chunk"
-            type="range"
-            min={400}
-            max={2400}
-            step={100}
-            value={chunkSize}
-            onChange={(e) => setChunkSize(Number(e.target.value))}
-            className="w-full accent-brand-black"
-          />
-          <p className="mt-1.5 text-[11px] leading-relaxed text-brand-black/40">
-            Structured documents split on headings regardless; this is the cap.
-          </p>
-        </div>
-
-        <div className="grid gap-4 sm:grid-cols-2">
+      ) : (
+        <div className="space-y-5">
           <div>
-            <label className="label mb-2 block">Include (one per line)</label>
+            <label className="label mb-2 block">Description</label>
             <Textarea
-              rows={5}
-              value={include}
-              onChange={(e) => setInclude(e.target.value)}
-              className="mono text-[11px]"
+              rows={3}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
             />
           </div>
-          <div>
-            <label className="label mb-2 block">Exclude (one per line)</label>
-            <Textarea
-              rows={5}
-              value={exclude}
-              onChange={(e) => setExclude(e.target.value)}
-              className="mono text-[11px]"
+
+          <div className="border-t border-brand-black/[0.06] pt-4">
+            <Toggle
+              checked={shouldFilter}
+              onChange={setShouldFilter}
+              label="LLM extraction filter"
+              hint="Run each chunk past the filter prompt before storing memories."
             />
           </div>
+
+          <div>
+            <label className="label mb-2 block">Filter prompt</label>
+            <Textarea
+              rows={4}
+              value={filterPrompt}
+              onChange={(e) => setFilterPrompt(e.target.value)}
+              disabled={!shouldFilter}
+              placeholder="Keep lasting preferences and decisions. Skip scheduling chatter and one-off logistics."
+              className={shouldFilter ? "" : "opacity-50"}
+            />
+          </div>
+
+          <div>
+            <div className="mb-2 flex items-baseline justify-between">
+              <label htmlFor="chunk" className="label">
+                Chunk size
+              </label>
+              <span className="tnum text-xs font-medium text-brand-black">
+                {chunkSize} tokens
+              </span>
+            </div>
+            <input
+              id="chunk"
+              type="range"
+              min={400}
+              max={2400}
+              step={100}
+              value={chunkSize}
+              onChange={(e) => setChunkSize(Number(e.target.value))}
+              className="w-full accent-brand-black"
+            />
+            <p className="mt-1.5 text-[11px] leading-relaxed text-brand-black/40">
+              Structured documents split on headings regardless; this is the cap.
+            </p>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className="label mb-2 block">Include (one per line)</label>
+              <Textarea
+                rows={5}
+                value={include}
+                onChange={(e) => setInclude(e.target.value)}
+                className="mono text-[11px]"
+              />
+            </div>
+            <div>
+              <label className="label mb-2 block">Exclude (one per line)</label>
+              <Textarea
+                rows={5}
+                value={exclude}
+                onChange={(e) => setExclude(e.target.value)}
+                className="mono text-[11px]"
+              />
+            </div>
+          </div>
         </div>
-      </div>
+      )}
     </Drawer>
   );
 }

@@ -1,21 +1,21 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { BarRows, LineChart, SegmentBar, Sparkline, Stat } from "@/components/charts";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { BarRows, SegmentBar, Stat } from "@/components/charts";
 import { useMemoryReview } from "@/components/blocks/memory-review-deck";
 import { PillTabList } from "@/components/blocks/pill-tab-list";
 import { PageBody } from "@/components/shell";
 import { Badge, Card, Skeleton } from "@/components/ui";
-import { type Stats } from "@/lib/api";
+import { type HealthResponse } from "@/lib/api";
 import {
   invalidateCorpus,
   prefetch,
   useDocumentList,
+  useHealth,
   useMemoryList,
   useProcessing,
   useSpaces,
-  useStats,
 } from "@/lib/queries";
 import {
   STATUS_COLOR,
@@ -26,24 +26,24 @@ import {
   duration,
   relTime,
 } from "@/lib/format";
-import type { Document, DocumentStatus, MemoryEntry } from "@/lib/types";
+import type { ContainerTag, Document, DocumentStatus, MemoryEntry } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 /** First screen of recent activity — shared with `warm()` so the keys match. */
 const RECENT_MEMORIES = { limit: 8, sort: "createdAt" } as const;
-/** Corpus snapshot for pipeline "today" + failures cards. */
-const DOC_SNAPSHOT = {
-  limit: 500,
+/** Bounded metadata-only sample for recent pipeline and failure cards. */
+const RECENT_DOCUMENTS = {
+  limit: 50,
   sort: "updatedAt",
   order: "desc",
 } as const;
 
 export function warm(): void {
-  void prefetch.stats();
   void prefetch.memories(RECENT_MEMORIES);
   void prefetch.processing();
-  void prefetch.documents(DOC_SNAPSHOT);
+  void prefetch.documents(RECENT_DOCUMENTS);
   void prefetch.spaces();
+  void prefetch.health();
 }
 
 export default function DashboardPage() {
@@ -51,28 +51,44 @@ export default function DashboardPage() {
   // ordinary stale-while-revalidate refresh. `useQuery` pauses the timer
   // whenever the tab is off screen.
   const [poll, setPoll] = useState<number | false>(false);
-  const [pipelineRange, setPipelineRange] = useState<"today" | "all">("today");
+  const [pipelineRange, setPipelineRange] = useState<"active" | "recent">("active");
 
-  const statsQuery = useStats({ refetchInterval: poll });
-  const recentQuery = useMemoryList(RECENT_MEMORIES, { refetchInterval: poll });
+  const healthQuery = useHealth();
+  const recentQuery = useMemoryList(RECENT_MEMORIES);
   const processingQuery = useProcessing({ refetchInterval: poll });
-  const documentsQuery = useDocumentList(DOC_SNAPSHOT, { refetchInterval: poll });
-  const { spaces } = useSpaces();
+  const documentsQuery = useDocumentList(RECENT_DOCUMENTS);
+  const spacesQuery = useSpaces();
+  const { spaces } = spacesQuery;
 
   const inflight = processingQuery.documents.length;
+  const previousInflight = useRef<number | null>(null);
   useEffect(() => {
     setPoll(inflight > 0 && 3000);
+    if (
+      previousInflight.current !== null &&
+      previousInflight.current > 0 &&
+      inflight === 0
+    ) {
+      void healthQuery.refetch();
+      void recentQuery.refetch();
+      void documentsQuery.refetch();
+      void spacesQuery.refetch();
+    }
+    previousInflight.current = inflight;
   }, [inflight]);
 
-  const stats = statsQuery.data ?? null;
+  const health = healthQuery.data ?? null;
   const recent = recentQuery.data?.memoryEntries ?? [];
   const processing = processingQuery.documents;
   const documents = documentsQuery.data?.memories ?? [];
+  const documentCount = documentsQuery.data?.pagination.totalItems ?? 0;
+  const memoryCount = spaces.reduce((sum, space) => sum + space.memoryCount, 0);
   const failure =
-    statsQuery.error ??
+    healthQuery.error ??
     recentQuery.error ??
     processingQuery.error ??
-    documentsQuery.error;
+    documentsQuery.error ??
+    spacesQuery.error;
   const error = failure
     ? failure instanceof Error
       ? failure.message
@@ -80,10 +96,11 @@ export default function DashboardPage() {
     : null;
 
   const load = () => {
-    void statsQuery.refetch();
+    void healthQuery.refetch();
     void recentQuery.refetch();
     void processingQuery.refetch();
     void documentsQuery.refetch();
+    void spacesQuery.refetch();
   };
 
   const review = useMemoryReview({
@@ -109,7 +126,7 @@ export default function DashboardPage() {
         </Card>
       )}
 
-      {!stats ? (
+      {!health || documentsQuery.data === undefined || spacesQuery.isLoading ? (
         <LoadingGrid />
       ) : (
         <PillTabList
@@ -121,7 +138,6 @@ export default function DashboardPage() {
                 <RecentTab
                   recent={recent}
                   reviewPane={review.pane}
-                  stats={stats}
                   documents={documents}
                   processing={processing}
                   pipelineRange={pipelineRange}
@@ -132,15 +148,24 @@ export default function DashboardPage() {
             {
               value: "overview",
               label: "Overview",
-              content: <OverviewTab stats={stats} />,
+              content: (
+                <OverviewTab
+                  documentCount={documentCount}
+                  memoryCount={memoryCount}
+                  processingCount={inflight}
+                  spaces={spaces}
+                />
+              ),
             },
             {
               value: "instance",
               label: "Instance",
               content: (
                 <InstanceTab
-                  stats={stats}
+                  health={health}
                   documents={documents}
+                  documentCount={documentCount}
+                  spaces={spaces}
                   onRefresh={load}
                 />
               ),
@@ -157,7 +182,6 @@ export default function DashboardPage() {
 function RecentTab({
   recent,
   reviewPane,
-  stats,
   documents,
   processing,
   pipelineRange,
@@ -165,11 +189,10 @@ function RecentTab({
 }: {
   recent: MemoryEntry[];
   reviewPane: ReactNode;
-  stats: Stats;
   documents: Document[];
   processing: Document[];
-  pipelineRange: "today" | "all";
-  onPipelineRangeChange: (next: "today" | "all") => void;
+  pipelineRange: "active" | "recent";
+  onPipelineRangeChange: (next: "active" | "recent") => void;
 }) {
   return (
     <div className="flex flex-col gap-6">
@@ -178,7 +201,6 @@ function RecentTab({
           <div className="min-w-0 [&>section]:h-full [&>div]:h-full">{reviewPane}</div>
           <PipelineCard
             className="h-full"
-            stats={stats}
             documents={documents}
             processing={processing}
             pipelineRange={pipelineRange}
@@ -230,73 +252,67 @@ function RecentTab({
   );
 }
 
-function OverviewTab({ stats }: { stats: Stats }) {
+function OverviewTab({
+  documentCount,
+  memoryCount,
+  processingCount,
+  spaces,
+}: {
+  documentCount: number;
+  memoryCount: number;
+  processingCount: number;
+  spaces: ContainerTag[];
+}) {
   return (
     <div className="flex flex-col gap-6">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Stat
           label="Memories"
-          value={compact(stats.memories)}
-          hint={`${stats.staticFacts} asserted · ${stats.inferences} inferred`}
+          value={compact(memoryCount)}
+          hint="Active memories across spaces"
         />
         <Stat
           label="Documents"
-          value={compact(stats.documents)}
-          hint={
-            stats.chunks == null
-              ? "chunk count unavailable"
-              : `${compact(stats.chunks)} chunks indexed`
-          }
+          value={compact(documentCount)}
+          hint="From paginated document totals"
         />
         <Stat
-          label="Relations"
-          value={compact(stats.relations)}
-          hint={`${stats.versioned} memories revised`}
+          label="Spaces"
+          value={compact(spaces.length)}
+          hint="Server aggregate"
         />
         <Stat
-          label="Forgotten"
-          value={compact(stats.forgotten)}
-          hint="Edges retained"
+          label="Processing"
+          value={compact(processingCount)}
+          hint={processingCount > 0 ? "Pipeline active" : "Pipeline idle"}
         />
       </div>
 
       <Card>
         <PanelHeader
-          eyebrow="Ingest"
-          title="Activity"
-          meta="last 30 days"
+          eyebrow="Partition"
+          title="Memories by space"
+          meta={`${spaces.length} spaces`}
           action={
             <Link
-              href="/documents"
+              href="/spaces"
               className="text-[11px] font-bold uppercase tracking-[0.14em] text-brand-black/45 transition-colors duration-200 hover:text-brand-black"
             >
-              View all
+              Manage
             </Link>
           }
         />
         <div className="border-t border-brand-black/[0.05] px-6 py-5">
-          <LineChart
-            labels={stats.activity.map((a) =>
-              new Date(a.date + "T00:00:00Z").toLocaleDateString("en-US", {
-                month: "short",
-                day: "numeric",
-                timeZone: "UTC",
-              }),
-            )}
-            series={[
-              {
-                key: "memories",
-                label: "Memories extracted",
-                color: "var(--color-s3)",
-                values: stats.activity.map((a) => a.memories),
-              },
-              {
-                key: "documents",
-                label: "Documents ingested",
-                color: "var(--color-s1)",
-                values: stats.activity.map((a) => a.documents),
-              },
-            ]}
+          <BarRows
+            rows={spaces
+              .slice()
+              .sort((a, b) => b.memoryCount - a.memoryCount)
+              .map((space) => ({
+                label: space.name,
+                value: space.memoryCount,
+                hint: `${space.documentCount} documents`,
+              }))}
+            color="var(--color-s3)"
           />
         </div>
       </Card>
@@ -305,12 +321,16 @@ function OverviewTab({ stats }: { stats: Stats }) {
 }
 
 function InstanceTab({
-  stats,
+  health,
   documents,
+  documentCount,
+  spaces,
   onRefresh,
 }: {
-  stats: Stats;
+  health: HealthResponse;
   documents: Document[];
+  documentCount: number;
+  spaces: ContainerTag[];
   onRefresh: () => void;
 }) {
   const failedDocs = useMemo(
@@ -338,28 +358,28 @@ function InstanceTab({
           <PanelHeader
             eyebrow="Server"
             title="Instance"
-            meta={stats.server.mode}
+            meta={health.mode}
           />
           <dl className="divide-y divide-brand-black/[0.05] border-t border-brand-black/[0.05] px-6 text-[13px]">
             <Row
               label="Version"
-              value={stats.server.version ? `v${stats.server.version}` : "—"}
+              value={health.version ? `v${health.version}` : "—"}
             />
-            <Row label="Endpoint" value={stats.server.baseUrl} mono />
+            <Row label="Endpoint" value={health.baseUrl} mono />
             <Row
               label="Uptime"
               value={
-                stats.server.uptimeSeconds != null
-                  ? duration(stats.server.uptimeSeconds)
+                health.uptimeSeconds != null
+                  ? duration(health.uptimeSeconds)
                   : "—"
               }
             />
             <Row
               label="Embeddings"
-              value={stats.server.embeddings?.model ?? "—"}
+              value={health.embeddings?.model ?? "—"}
               mono
               badge={
-                stats.server.embeddings?.local ? (
+                health.embeddings?.local ? (
                   <Badge tone="good">local</Badge>
                 ) : undefined
               }
@@ -367,8 +387,8 @@ function InstanceTab({
             <Row
               label="Extraction"
               value={
-                stats.server.llm
-                  ? [stats.server.llm.provider, stats.server.llm.model]
+                health.llm
+                  ? [health.llm.provider, health.llm.model]
                       .filter(Boolean)
                       .join("/")
                   : "—"
@@ -378,54 +398,45 @@ function InstanceTab({
             <Row
               label="Vectors"
               value={
-                stats.chunks != null && stats.server.embeddings
-                  ? `${compact(stats.chunks)} × ${stats.server.embeddings.dimensions}d`
-                  : "—"
-              }
-              hint={
-                stats.vectorBytes != null ? bytes(stats.vectorBytes) : undefined
+                health.counts?.chunks != null && health.embeddings
+                  ? `${compact(health.counts.chunks)} × ${health.embeddings.dimensions}d`
+                  : "Unavailable"
               }
             />
             <Row
               label="State"
               value={
-                stats.server.storage
-                  ? bytes(stats.server.storage.sizeBytes)
+                health.storage
+                  ? bytes(health.storage.sizeBytes)
                   : "—"
               }
-              hint={stats.server.storage?.path}
+              hint={health.storage?.path}
             />
           </dl>
         </Card>
 
         <Card>
-          <PanelHeader eyebrow="Recall" title="Latency" meta="last 40 queries" />
-          <div className="border-t border-brand-black/[0.05] px-6 py-5">
-            <Sparkline
-              values={stats.latencies}
-              color="var(--color-s1)"
-              height={56}
-              suffix="ms"
+          <PanelHeader eyebrow="Server" title="Health" meta={health.status} />
+          <dl className="divide-y divide-brand-black/[0.05] border-t border-brand-black/[0.05] px-6 text-[13px]">
+            <Row
+              label="Probe"
+              value={health.latencyMs == null ? "—" : `${health.latencyMs} ms`}
             />
-            <p className="mt-3 text-[12px] leading-relaxed text-brand-black/55">
-              Vector search against{" "}
-              <span className="text-brand-black/70">
-                {stats.chunks == null ? "—" : compact(stats.chunks)}
-              </span>{" "}
-              chunks.
-            </p>
-          </div>
+            <Row label="Documents" value={compact(documentCount)} />
+            <Row label="Memories" value={compact(health.counts?.memories ?? 0)} />
+            <Row label="Spaces" value={compact(spaces.length)} />
+          </dl>
         </Card>
 
         <Card>
           <PanelHeader
             eyebrow="Corpus"
-            title="By type"
-            meta={`${stats.documents} docs`}
+            title="Recent by type"
+            meta={`${documents.length} of ${documentCount} docs`}
           />
           <div className="border-t border-brand-black/[0.05] px-6 py-5">
             <BarRows
-              rows={Object.entries(stats.byType)
+              rows={Object.entries(countByType(documents))
                 .sort((a, b) => b[1] - a[1])
                 .slice(0, 6)
                 .map(([type, count]) => ({
@@ -439,10 +450,10 @@ function InstanceTab({
         <Card>
           <PanelHeader
             eyebrow="Pipeline"
-            title="Failures"
-            meta={stats.failed ? `${compact(stats.failed)} failed` : "None"}
+            title="Recent failures"
+            meta={failedDocs.length ? `${compact(failedDocs.length)} in sample` : "None"}
             action={
-              stats.failed > 0 ? (
+              failedDocs.length > 0 ? (
                 <Link
                   href="/documents?status=failed"
                   className="text-[11px] font-bold uppercase tracking-[0.14em] text-brand-black/45 transition-colors duration-200 hover:text-brand-black"
@@ -500,7 +511,7 @@ function InstanceTab({
           }
         />
         <ul className="divide-y divide-brand-black/[0.05] border-t border-brand-black/[0.05]">
-          {stats.spaces.map((s) => (
+          {spaces.map((s) => (
             <li key={s.containerTag}>
               <Link
                 href={`/memories?space=${s.containerTag}`}
@@ -527,39 +538,32 @@ function InstanceTab({
 }
 
 function PipelineCard({
-  stats,
   documents,
   processing,
   className,
   pipelineRange,
   onPipelineRangeChange,
 }: {
-  stats: Stats;
   documents: Document[];
   processing: Document[];
   className?: string;
-  pipelineRange: "today" | "all";
-  onPipelineRangeChange: (next: "today" | "all") => void;
+  pipelineRange: "active" | "recent";
+  onPipelineRangeChange: (next: "active" | "recent") => void;
 }) {
-  const dayKey = new Date().toDateString();
-
   const pipeline = useMemo(() => {
-    if (pipelineRange === "all") {
+    if (pipelineRange === "active") {
       return {
-        byStatus: stats.byStatus,
-        inFlight: stats.processing,
+        byStatus: countByStatus(processing),
+        inFlight: processing.length,
         items: processing,
       };
     }
-    const now = new Date();
-    const todays = documents.filter((d) => isLocalDay(d.updatedAt, now));
-    const byStatus = countByStatus(todays);
-    const items = processing.filter((d) => isLocalDay(d.updatedAt, now));
-    const inFlight = todays.filter(
+    const byStatus = countByStatus(documents);
+    const inFlight = documents.filter(
       (d) => d.status !== "done" && d.status !== "failed",
     ).length;
-    return { byStatus, inFlight, items };
-  }, [pipelineRange, stats.byStatus, stats.processing, documents, processing, dayKey]);
+    return { byStatus, inFlight, items: documents };
+  }, [pipelineRange, documents, processing]);
 
   return (
     <Card className={cn("flex flex-col", className)}>
@@ -589,7 +593,12 @@ function PipelineCard({
             {pipeline.items.slice(0, 5).map((d) => (
               <li key={d.id} className="flex items-center gap-2.5 py-3">
                 <span
-                  className="size-1.5 shrink-0 animate-soft-pulse rounded-full"
+                  className={cn(
+                    "size-1.5 shrink-0 rounded-full",
+                    d.status !== "done" &&
+                      d.status !== "failed" &&
+                      "animate-soft-pulse",
+                  )}
                   style={{ background: STATUS_COLOR[d.status] }}
                 />
                 <span className="min-w-0 flex-1 truncate text-[13px] text-brand-black">
@@ -611,8 +620,8 @@ function PipelineRangeSwitch({
   value,
   onChange,
 }: {
-  value: "today" | "all";
-  onChange: (next: "today" | "all") => void;
+  value: "active" | "recent";
+  onChange: (next: "active" | "recent") => void;
 }) {
   return (
     <div
@@ -621,8 +630,8 @@ function PipelineRangeSwitch({
       className="inline-flex shrink-0 gap-0.5 rounded-full border border-brand-black/[0.06] bg-brand-black/[0.03] p-0.5"
     >
       {([
-        ["today", "Today"],
-        ["all", "All"],
+        ["active", "Active"],
+        ["recent", "Recent"],
       ] as const).map(([key, label]) => (
         <button
           key={key}
@@ -653,15 +662,6 @@ const PIPELINE_STATUSES: DocumentStatus[] = [
   "failed",
 ];
 
-function isLocalDay(iso: string, now = new Date()): boolean {
-  const d = new Date(iso);
-  return (
-    d.getFullYear() === now.getFullYear() &&
-    d.getMonth() === now.getMonth() &&
-    d.getDate() === now.getDate()
-  );
-}
-
 function countByStatus(docs: Document[]): Record<string, number> {
   const counts = Object.fromEntries(
     PIPELINE_STATUSES.map((s) => [s, 0]),
@@ -669,6 +669,12 @@ function countByStatus(docs: Document[]): Record<string, number> {
   for (const doc of docs) {
     counts[doc.status] = (counts[doc.status] ?? 0) + 1;
   }
+  return counts;
+}
+
+function countByType(docs: Document[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const doc of docs) counts[doc.type] = (counts[doc.type] ?? 0) + 1;
   return counts;
 }
 

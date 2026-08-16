@@ -68,16 +68,60 @@ function corpusBackend(input: {
   tagInfo?: Record<string, unknown>;
 }): RemoteHandler {
   return (call) => {
+    if (call.url.endsWith("/v3/container-tags/list")) {
+      const documents = (input.documents ?? []) as {
+        containerTags?: string[];
+      }[];
+      const tags = new Set([
+        ...documents.flatMap((doc) => doc.containerTags ?? []),
+        ...Object.keys(input.memoriesByTag ?? {}),
+        ...Object.keys(input.tagInfo ?? {}),
+      ]);
+      return jsonResponse(
+        Array.from(tags).map((containerTag) => {
+          const info = (input.tagInfo?.[containerTag] ?? {}) as Record<string, unknown>;
+          const memories = (input.memoriesByTag?.[containerTag] ?? []) as {
+            isForgotten?: boolean;
+          }[];
+          return {
+            id: `space_${containerTag}`,
+            name: info.name ?? containerTag,
+            containerTag,
+            description: info.description ?? null,
+            createdAt: "2026-08-01T00:00:00.000Z",
+            updatedAt: "2026-08-01T00:00:00.000Z",
+            documentCount: documents.filter((doc) =>
+              doc.containerTags?.includes(containerTag),
+            ).length,
+            memoryCount: memories.filter((memory) => !memory.isForgotten).length,
+            lastActivityAt: null,
+          };
+        }),
+      );
+    }
     if (call.url.endsWith("/v3/documents/list")) {
       return jsonResponse({
         memories: input.documents ?? [],
-        pagination: { totalPages: 1 },
+        pagination: {
+          totalItems: input.documents?.length ?? 0,
+          totalPages: 1,
+        },
       });
     }
     if (call.url.endsWith("/v4/memories/list")) {
       const body = call.body as { containerTags: string[]; page?: number; limit?: number };
-      const [tag] = body.containerTags;
-      const all = input.memoriesByTag?.[tag!] ?? [];
+      const all = body.containerTags.flatMap((tag) =>
+        (input.memoriesByTag?.[tag] ?? []).map((memory) => {
+          const shaped = memory as Record<string, unknown>;
+          return {
+            ...shaped,
+            spaceId:
+              shaped.spaceId === "opaque_space_id" || shaped.spaceId == null
+                ? `space_${tag}`
+                : shaped.spaceId,
+          };
+        }),
+      );
       const limit = body.limit ?? 100;
       const page = body.page ?? 1;
       const totalItems = all.length;
@@ -309,7 +353,7 @@ describe("liveSpaces", () => {
     expect(containerTags[0]!.name).toBe("sm_research");
   });
 
-  it("keeps a deliberate custom name and merges partial settings", async () => {
+  it("keeps a deliberate custom name and defers settings", async () => {
     const { live } = await loadLive(
       corpusBackend({
         documents: [{ id: "doc_1", containerTags: ["sm_research"] }],
@@ -331,7 +375,7 @@ describe("liveSpaces", () => {
     expect(space!.settings).toEqual({
       shouldLLMFilter: null,
       filterPrompt: null,
-      chunkSize: 900,
+      chunkSize: null,
       includeItems: [],
       excludeItems: [],
     });
