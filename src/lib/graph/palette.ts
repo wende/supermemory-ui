@@ -30,7 +30,7 @@ export type ThemePalette = {
   critical: string;
 };
 
-export function resolveCssColor(el: Element, value: string, fallback: string): string {
+function resolveCssColor(el: Element, value: string, fallback: string): string {
   if (!value) return fallback;
   // Hex / rgb / named colors paint fine on canvas; color-mix / vars need resolving.
   if (/^#|^rgb|^hsl|^oklch|^[a-z]+$/i.test(value.trim())) return value.trim();

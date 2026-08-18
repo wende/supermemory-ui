@@ -1,5 +1,5 @@
 import { body, fail, ok } from "@/lib/http";
-import { proxyJson, wantsRemote } from "@/lib/remote";
+import { proxyJson, remoteErrorMessage, wantsRemote } from "@/lib/remote";
 import { pickTag } from "@/lib/tags";
 import { db } from "@/lib/store";
 
@@ -18,7 +18,7 @@ export async function POST(req: Request) {
     if (!success) {
       return fail(
         status,
-        (data as { error?: string })?.error ?? "Profile buckets failed",
+        remoteErrorMessage(data, "Profile buckets failed"),
       );
     }
     return ok(data);

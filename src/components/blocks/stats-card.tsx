@@ -6,7 +6,6 @@
  * Layout: uppercase eyebrow label | status pill in the top-right,
  *         3xl metric, two lines of supporting text below.
  */
-import * as React from "react";
 import { cn } from "@/lib/utils";
 import { StatusPill } from "@/components/blocks/status-pill";
 

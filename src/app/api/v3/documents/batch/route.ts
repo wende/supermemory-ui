@@ -1,5 +1,5 @@
 import { body, delay, fail, ok } from "@/lib/http";
-import { proxyJson, wantsRemote } from "@/lib/remote";
+import { proxyJson, remoteErrorMessage, wantsRemote } from "@/lib/remote";
 import { clearTagCache } from "@/lib/tags";
 import { addDocument } from "@/lib/store";
 import type { Document } from "@/lib/types";
@@ -36,7 +36,7 @@ export async function POST(req: Request) {
     if (!success) {
       return fail(
         status,
-        (data as { error?: string })?.error ?? "Batch add failed",
+        remoteErrorMessage(data, "Batch add failed"),
       );
     }
     clearTagCache();

@@ -1,5 +1,5 @@
 import { body, delay, fail, ok } from "@/lib/http";
-import { proxyJson, passthrough, proxy, wantsRemote } from "@/lib/remote";
+import { proxyJson, passthrough, proxy, remoteErrorMessage, wantsRemote } from "@/lib/remote";
 import { clearTagCache } from "@/lib/tags";
 import { deleteSpace, spacesWithCounts, updateSpace } from "@/lib/store";
 import type { ContainerTag } from "@/lib/types";
@@ -51,7 +51,7 @@ export async function DELETE(req: Request, { params }: Ctx) {
     if (!success) {
       return fail(
         status,
-        (data as { error?: string })?.error ?? `No container tag "${tag}".`,
+        remoteErrorMessage(data, `No container tag "${tag}".`),
         "not_found",
       );
     }

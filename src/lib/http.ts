@@ -1,8 +1,5 @@
 import { NextResponse } from "next/server";
 
-/** Every mock route is request-time; nothing here is prerenderable. */
-export const dynamicRoute = "force-dynamic";
-
 export function ok<T>(body: T, init?: ResponseInit) {
   return NextResponse.json(body, init);
 }

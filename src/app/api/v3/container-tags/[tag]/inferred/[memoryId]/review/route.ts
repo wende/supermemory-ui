@@ -1,5 +1,5 @@
 import { body, delay, fail, ok } from "@/lib/http";
-import { proxyJson, wantsRemote } from "@/lib/remote";
+import { proxyJson, remoteErrorMessage, wantsRemote } from "@/lib/remote";
 import { reviewInferred, type ReviewAction } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
@@ -30,7 +30,7 @@ export async function POST(req: Request, { params }: Ctx) {
     if (!success) {
       return fail(
         status,
-        (data as { error?: string })?.error ?? "Review failed",
+        remoteErrorMessage(data, "Review failed"),
         status === 409 ? "conflict" : status === 404 ? "not_found" : "error",
       );
     }

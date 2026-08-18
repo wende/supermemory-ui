@@ -1,5 +1,5 @@
 import { fail, ok } from "@/lib/http";
-import { proxyJson, wantsRemote } from "@/lib/remote";
+import { proxyJson, remoteErrorMessage, wantsRemote } from "@/lib/remote";
 import { getChunks, getDocument } from "@/lib/store";
 import type { DocumentChunk } from "@/lib/types";
 
@@ -21,7 +21,7 @@ export async function GET(
     if (!success) {
       return fail(
         status,
-        (data as { error?: string })?.error ?? `No document "${id}".`,
+        remoteErrorMessage(data, `No document "${id}".`),
         "not_found",
       );
     }

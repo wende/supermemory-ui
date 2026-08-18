@@ -88,14 +88,80 @@ describe("matcher", () => {
     }
   });
 
-  it("skips static assets and the API surface", () => {
+  it("skips static assets", () => {
     for (const path of [
       "/_next/static/chunk.js",
       "/_next/image?url=x",
       "/favicon.ico",
-      "/api/v4/search",
     ]) {
       expect(matcher.test(path)).toBe(false);
     }
+  });
+
+  it("runs on the API surface, which needs the cross-site guard", () => {
+    expect(matcher.test("/api/v4/search")).toBe(true);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Cross-site write guard                                              */
+/* ------------------------------------------------------------------ */
+
+function apiCall(
+  method: string,
+  headers: Record<string, string> = {},
+  path = "/api/v3/settings/reset",
+) {
+  return middleware(
+    new NextRequest(
+      new Request(`http://console.local${path}`, {
+        method,
+        headers: { host: "console.local", ...headers },
+      }),
+    ),
+  );
+}
+
+describe("cross-site writes to the API", () => {
+  it("blocks a mutation a browser reports as cross-site", () => {
+    for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
+      expect(apiCall(method, { "sec-fetch-site": "cross-site" }).status).toBe(403);
+    }
+  });
+
+  it("blocks a mutation whose Origin is another host", () => {
+    expect(apiCall("POST", { origin: "https://evil.example" }).status).toBe(403);
+  });
+
+  it("blocks a mutation whose Origin is unparseable", () => {
+    expect(apiCall("POST", { origin: "null" }).status).toBe(403);
+  });
+
+  it("allows same-origin and same-site writes from the console itself", () => {
+    for (const site of ["same-origin", "same-site", "none"]) {
+      expect(apiCall("POST", { "sec-fetch-site": site }).status).toBe(200);
+    }
+    expect(apiCall("POST", { origin: "http://console.local" }).status).toBe(200);
+  });
+
+  it("allows a write from a non-browser caller, which cannot be forged", () => {
+    expect(apiCall("POST").status).toBe(200);
+  });
+
+  it("leaves reads alone even when they are cross-site", () => {
+    expect(
+      apiCall("GET", { "sec-fetch-site": "cross-site" }, "/api/health").status,
+    ).toBe(200);
+  });
+
+  it("does not touch page navigations", () => {
+    const res = middleware(
+      new NextRequest(
+        new Request("http://console.local/graph?mock", {
+          headers: { "sec-fetch-site": "cross-site" },
+        }),
+      ),
+    );
+    expect(backendCookie(res)?.value).toBe("mock");
   });
 });
