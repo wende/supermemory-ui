@@ -1,4 +1,4 @@
-import type { GraphEdge, GraphNode, GraphNodeKind } from "@/lib/types";
+import type { GraphEdge, GraphNode } from "@/lib/types";
 
 export type ColorToken =
   | "s1"
@@ -73,5 +73,3 @@ export interface SimLink {
 export type PositionMap = Map<string, { x: number; y: number; pinned?: boolean }>;
 
 export type NodePredicate = (node: GraphNode, edges: GraphEdge[]) => boolean;
-
-export type { GraphNode, GraphEdge, GraphNodeKind };

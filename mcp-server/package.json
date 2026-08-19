@@ -1,0 +1,18 @@
+{
+  "name": "supermemory-local-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local MCP bridge for a self-hosted Supermemory instance.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test lib.node-tests.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "express": "^5.2.1",
+    "zod": "^4.4.3"
+  }
+}

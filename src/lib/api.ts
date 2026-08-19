@@ -23,13 +23,8 @@ import type {
   ServerInfo,
 } from "./types";
 
-const BASE = "/api";
-
 /** Always `/api` — remote vs mock is decided server-side. */
-export const API_BASE = BASE;
-
-/** @deprecated Prefer health.backend; kept for pages that still import it. */
-export const IS_MOCK = true;
+export const API_BASE = "/api";
 
 export class ApiError extends Error {
   constructor(
@@ -50,7 +45,7 @@ async function call<T>(
   const headers = new Headers(rest.headers);
   if (json !== undefined) headers.set("content-type", "application/json");
 
-  const res = await fetch(`${BASE}${path}`, {
+  const res = await fetch(`${API_BASE}${path}`, {
     ...rest,
     headers,
     body: json !== undefined ? JSON.stringify(json) : rest.body,
@@ -368,7 +363,7 @@ export const api = {
     // `stream=1` for explorers.
     p.set("stream", "1");
     const qs = p.toString();
-    const res = await fetch(`${BASE}/v4/graph?${qs}`, { cache: "no-store" });
+    const res = await fetch(`${API_BASE}/v4/graph?${qs}`, { cache: "no-store" });
     if (!res.ok) {
       const text = await res.text();
       const parsed = text ? safeParse(text) : null;
@@ -388,7 +383,7 @@ export const api = {
     const started = performance.now();
     const headers = new Headers();
     if (jsonBody !== undefined) headers.set("content-type", "application/json");
-    const res = await fetch(`${BASE}${path}`, {
+    const res = await fetch(`${API_BASE}${path}`, {
       method,
       headers,
       body: jsonBody !== undefined ? JSON.stringify(jsonBody) : undefined,

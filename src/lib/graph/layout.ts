@@ -11,7 +11,7 @@ import type { GraphEdge, GraphNode, GraphResponse } from "@/lib/types";
 import type { GraphSettings, PositionMap, SimLink, SimNode } from "./types";
 
 /** Rest distance multipliers relative to sources (=1.0). */
-export const REST: Record<GraphEdge["relation"], number> = {
+const REST: Record<GraphEdge["relation"], number> = {
   contains: 1.5,
   sources: 1.0,
   extends: 0.85,
@@ -20,7 +20,7 @@ export const REST: Record<GraphEdge["relation"], number> = {
 };
 
 /** Stiffness multipliers; contains is soft so space hubs don't dominate. */
-export const STIFF: Record<GraphEdge["relation"], number> = {
+const STIFF: Record<GraphEdge["relation"], number> = {
   contains: 0.28,
   sources: 1,
   extends: 1,
@@ -174,7 +174,7 @@ export function createSimulation(
 }
 
 /** Attract nodes toward a stable anchor for their space (ring by sorted id). */
-export function forceSpaceCluster(strength: number) {
+function forceSpaceCluster(strength: number) {
   let nodes: SimNode[] = [];
   let anchors = new Map<string, { x: number; y: number }>();
 

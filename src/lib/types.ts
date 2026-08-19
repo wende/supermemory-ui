@@ -45,25 +45,11 @@ export const DOCUMENT_TYPES = [
 ] as const;
 export type DocumentType = (typeof DOCUMENT_TYPES)[number];
 
-export const SEARCH_MODES = ["memories", "hybrid", "documents"] as const;
-export type SearchMode = (typeof SEARCH_MODES)[number];
+export type SearchMode = "memories" | "hybrid" | "documents";
 
-export const MEMORY_RELATIONS = ["updates", "extends", "derives"] as const;
-export type MemoryRelation = (typeof MEMORY_RELATIONS)[number];
+export type MemoryRelation = "updates" | "extends" | "derives";
 
-export const FILTER_TYPES = [
-  "metadata",
-  "numeric",
-  "array_contains",
-  "string_contains",
-] as const;
-export type FilterType = (typeof FILTER_TYPES)[number];
-
-export const NUMERIC_OPERATORS = [">", "<", ">=", "<=", "="] as const;
-export type NumericOperator = (typeof NUMERIC_OPERATORS)[number];
-
-export type MetadataValue = string | number | boolean | null;
-export type Metadata = Record<string, MetadataValue>;
+export type Metadata = Record<string, string | number | boolean | null>;
 
 /* ------------------------------------------------------------------ */
 /* Documents (v3)                                                      */

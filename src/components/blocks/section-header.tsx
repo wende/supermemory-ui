@@ -3,7 +3,6 @@
 /**
  * SectionHeader — eyebrow label + h2 title for showcase pages.
  */
-import * as React from "react";
 import { cn } from "@/lib/utils";
 
 interface SectionHeaderProps {

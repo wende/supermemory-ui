@@ -1,5 +1,5 @@
 import { fail, ok } from "@/lib/http";
-import { proxyJson, wantsRemote } from "@/lib/remote";
+import { proxyJson, remoteErrorMessage, wantsRemote } from "@/lib/remote";
 import { clearTagCache } from "@/lib/tags";
 import { deleteDocument, getDocument } from "@/lib/store";
 import type { Document } from "@/lib/types";
@@ -30,8 +30,7 @@ export async function GET(req: Request, { params }: Ctx) {
     if (!success) {
       return fail(
         status,
-        (data as { error?: string })?.error ??
-          `No document with id or customId "${id}".`,
+        remoteErrorMessage(data, `No document with id or customId "${id}".`),
         "not_found",
       );
     }
@@ -54,7 +53,7 @@ export async function DELETE(req: Request, { params }: Ctx) {
     if (!success) {
       return fail(
         status,
-        (data as { error?: string })?.error ?? `No document "${id}".`,
+        remoteErrorMessage(data, `No document "${id}".`),
         "not_found",
       );
     }

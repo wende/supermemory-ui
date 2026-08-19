@@ -7,7 +7,6 @@ import { useRouteParams } from "@/components/route-host";
 import { Icon } from "@/components/icons";
 import { PageBody, PageTitle } from "@/components/shell";
 import {
-  Badge,
   Button,
   Card,
   Copyable,

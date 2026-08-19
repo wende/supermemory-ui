@@ -126,7 +126,7 @@ export interface TimelineEvent {
  * genuinely new, and keeps its own post — and is omitted from the ingest
  * thread so the feed does not restate it.
  */
-export const GROUP_WINDOW_MS = 36 * 3_600_000;
+const GROUP_WINDOW_MS = 36 * 3_600_000;
 
 function time(iso: string): number {
   return new Date(iso).getTime();
@@ -334,7 +334,7 @@ function startOfDay(ms: number): number {
   return d.getTime();
 }
 
-export function dayKey(iso: string): string {
+function dayKey(iso: string): string {
   const d = new Date(iso);
   return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
 }

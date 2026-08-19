@@ -365,6 +365,21 @@ export function deleteDocument(id: string): boolean {
 /* Memories                                                            */
 /* ------------------------------------------------------------------ */
 
+export function compareMemoryEntries(
+  a: MemoryEntry,
+  b: MemoryEntry,
+  sort: "createdAt" | "updatedAt",
+  order: "asc" | "desc" = "desc",
+) {
+  const dir = order === "asc" ? 1 : -1;
+  const aValue = typeof a[sort] === "string" ? a[sort] : null;
+  const bValue = typeof b[sort] === "string" ? b[sort] : null;
+  if (aValue === bValue) return a.id.localeCompare(b.id);
+  if (aValue === null) return 1;
+  if (bValue === null) return -1;
+  return aValue < bValue ? -dir : dir;
+}
+
 export function listMemories(opts: {
   containerTags?: string[];
   documentId?: string;
@@ -396,8 +411,7 @@ export function listMemories(opts: {
   }
 
   const sort = opts.sort ?? "updatedAt";
-  const dir = opts.order === "asc" ? 1 : -1;
-  items.sort((a, b) => (a[sort] < b[sort] ? -dir : a[sort] > b[sort] ? dir : 0));
+  items.sort((a, b) => compareMemoryEntries(a, b, sort, opts.order));
 
   const { slice, pagination } = paginate(items, opts.page, opts.limit ?? 25);
   return { memoryEntries: slice, pagination };

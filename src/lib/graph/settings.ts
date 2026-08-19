@@ -1,7 +1,7 @@
 import type { ColorGroup, GraphSettings } from "./types";
 
 export const SETTINGS_KEY = "supermemory-graph-settings";
-export const SETTINGS_VERSION = 2 as const;
+const SETTINGS_VERSION = 2 as const;
 
 export const DEFAULT_SETTINGS: GraphSettings = {
   version: SETTINGS_VERSION,
@@ -127,7 +127,7 @@ export function loadSettings(): GraphSettings {
 }
 
 /** Write immediately. Prefer {@link saveSettings} from UI code. */
-export function saveSettingsNow(settings: GraphSettings): void {
+function saveSettingsNow(settings: GraphSettings): void {
   if (typeof window === "undefined") return;
   try {
     window.localStorage.setItem(
@@ -148,7 +148,7 @@ let warnedOnWriteFailure = false;
 let pendingWrite: ReturnType<typeof setTimeout> | null = null;
 let pendingSettings: GraphSettings | null = null;
 
-export const SAVE_DEBOUNCE_MS = 250;
+const SAVE_DEBOUNCE_MS = 250;
 
 /**
  * Coalesce writes. Slider drags fire change events at frame rate; serializing

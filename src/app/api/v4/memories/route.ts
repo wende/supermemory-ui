@@ -37,7 +37,7 @@ export async function POST(req: Request) {
     if (!success) {
       return fail(
         status,
-        (data as { error?: string })?.error ?? "Create memory failed",
+        remoteErrorMessage(data, "Create memory failed"),
       );
     }
     const entry = data.memories?.[0];
@@ -106,7 +106,7 @@ export async function PATCH(req: Request) {
     if (!success) {
       return fail(
         status,
-        (data as { error?: string })?.error ?? "Update memory failed",
+        remoteErrorMessage(data, "Update memory failed"),
       );
     }
     return ok(data);

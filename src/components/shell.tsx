@@ -6,6 +6,7 @@ import { Icon, type IconName } from "./icons";
 import { AppShell, PageContainer } from "@/components/layouts/app-shell";
 import { PageHeader as TemplatePageHeader } from "@/components/blocks/page-header";
 import { PageTransition } from "@/components/blocks/page-transition";
+import { ServerUnreachableModal } from "@/components/blocks/server-unreachable-modal";
 import { ThemeToggle } from "@/components/blocks/theme-toggle";
 import {
   Tooltip,
@@ -106,6 +107,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
       }
     >
       {children}
+      <ServerUnreachableModal />
     </AppShell>
   );
 }
@@ -171,23 +173,6 @@ export function PageTitle({
         </div>
       ) : null}
     </div>
-  );
-}
-
-/** @deprecated Use PageTitle inside PageBody instead — kept as alias during migration */
-export function PageHeader({
-  title,
-  description,
-  children,
-}: {
-  title: string;
-  description?: string;
-  children?: ReactNode;
-}) {
-  return (
-    <PageTitle title={title} description={description}>
-      {children}
-    </PageTitle>
   );
 }
 

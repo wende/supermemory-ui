@@ -1,5 +1,5 @@
 import { body, delay, fail, ok } from "@/lib/http";
-import { proxyJson, wantsRemote } from "@/lib/remote";
+import { proxyJson, remoteErrorMessage, wantsRemote } from "@/lib/remote";
 import { clearTagCache } from "@/lib/tags";
 import { db, mergeSpaces } from "@/lib/store";
 import type { MergeStatus } from "@/lib/types";
@@ -28,7 +28,7 @@ export async function POST(req: Request) {
     if (!success) {
       return fail(
         status,
-        (data as { error?: string })?.error ?? "Merge failed",
+        remoteErrorMessage(data, "Merge failed"),
       );
     }
     clearTagCache();
