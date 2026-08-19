@@ -106,6 +106,20 @@ describe("resolveTags", () => {
     expect(calls).toHaveLength(3);
   });
 
+  it("treats a missing pagination block as a single page", async () => {
+    const { tags, calls } = await loadTags((call) => {
+      if (call.url.endsWith("/v3/container-tags/list")) {
+        return jsonResponse({ error: "not found" }, 404);
+      }
+      return jsonResponse({
+        memories: [{ id: "doc_0", containerTags: ["sm_solo"] }],
+      });
+    });
+
+    expect(await tags.resolveTags()).toEqual(["sm_solo"]);
+    expect(calls).toHaveLength(2);
+  });
+
   it("ignores documents with missing or empty tags", async () => {
     const { tags } = await loadTags(() => tagList("", "sm_real"));
 

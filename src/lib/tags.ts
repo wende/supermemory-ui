@@ -111,12 +111,6 @@ export async function resolveTags(force = false): Promise<string[]> {
   return tags.length ? tags : ["sm_project_default"];
 }
 
-export async function resolveSpaceIdTags(): Promise<Map<string, string>> {
-  return new Map(
-    (await resolveTagSummaries()).map((space) => [space.id, space.containerTag]),
-  );
-}
-
 /** Prefer the caller's tag, else first discovered tag. */
 export async function pickTag(preferred?: string | null): Promise<string> {
   if (preferred?.trim()) return preferred.trim();
