@@ -149,17 +149,24 @@ export interface Stats {
   spaces: ContainerTag[];
 }
 
+export type HealthResponse = ServerInfo & {
+  status: string;
+  backend?: "mock" | "remote";
+  remoteConfigured?: boolean;
+  latencyMs?: number;
+  counts?: {
+    documents: number;
+    memories: number;
+    forgotten: number | null;
+    chunks: number | null;
+    spaces: number;
+  };
+};
+
 export const api = {
   /* dashboard + health ------------------------------------------- */
   stats: () => call<Stats>("/stats"),
-  health: () =>
-    call<
-      ServerInfo & {
-        status: string;
-        backend?: "mock" | "remote";
-        remoteConfigured?: boolean;
-      }
-    >("/health"),
+  health: () => call<HealthResponse>("/health"),
 
   /* documents ----------------------------------------------------- */
   listDocuments: (input: {
@@ -298,6 +305,11 @@ export const api = {
   /* spaces -------------------------------------------------------- */
   spaces: () =>
     call<{ containerTags: ContainerTag[]; merges: MergeStatus[] }>("/v3/container-tags"),
+
+  getSpace: (tag: string) =>
+    call<Partial<ContainerTag> & { containerTag: string }>(
+      `/v3/container-tags/${encodeURIComponent(tag)}`,
+    ),
 
   updateSpace: (
     tag: string,

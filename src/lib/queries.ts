@@ -11,7 +11,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { api, type Stats } from "./api";
+import { api, type HealthResponse, type Stats } from "./api";
 import { spaceDisplayName } from "./format";
 import { fetchQuery, invalidateQueries, queryKey, useQuery, type UseQueryOptions } from "./query";
 import type {
@@ -23,7 +23,6 @@ import type {
   MergeStatus,
   OrgSettings,
   ProfileResponse,
-  ServerInfo,
 } from "./types";
 
 /** Key scopes. Prefixes double as invalidation groups. */
@@ -63,12 +62,6 @@ export function invalidateCorpus(): void {
 /* ------------------------------------------------------------------ */
 
 type SpacesResponse = { containerTags: ContainerTag[]; merges: MergeStatus[] };
-type HealthResponse = ServerInfo & {
-  status: string;
-  backend?: "mock" | "remote";
-  remoteConfigured?: boolean;
-};
-
 const fetchSpaces = async (): Promise<SpacesResponse> => {
   const data = await api.spaces();
   return {
