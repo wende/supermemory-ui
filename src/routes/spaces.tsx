@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouteParams } from "@/components/route-host";
 import { BarRows } from "@/components/charts";
@@ -240,24 +240,32 @@ function SpaceDrawer({
   const [detail, setDetail] = useState<ContainerTag | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
 
+  // Keyed to the tag, not the `space` object: an in-place spaces refresh hands
+  // the drawer a fresh object for the same space, and re-running this would
+  // re-seed the form under an operator mid-edit.
+  const tag = space?.containerTag ?? null;
+  const spaceRef = useRef(space);
+  spaceRef.current = space;
+
   useEffect(() => {
-    if (!space) {
+    if (!tag) {
       setDetail(null);
       return;
     }
+    const base = spaceRef.current!;
     let cancelled = false;
     setDetail(null);
     setDetailError(null);
     setConfirming(false);
     void api
-      .getSpace(space.containerTag)
+      .getSpace(tag)
       .then((loaded) => {
         if (cancelled) return;
         setDetail({
-          ...space,
+          ...base,
           ...loaded,
-          containerTag: space.containerTag,
-          settings: { ...space.settings, ...loaded.settings },
+          containerTag: tag,
+          settings: { ...base.settings, ...loaded.settings },
         });
       })
       .catch((error: unknown) => {
@@ -269,7 +277,7 @@ function SpaceDrawer({
     return () => {
       cancelled = true;
     };
-  }, [space]);
+  }, [tag]);
 
   useEffect(() => {
     if (!detail) return;

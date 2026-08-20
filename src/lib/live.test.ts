@@ -517,6 +517,64 @@ describe("liveGraph", () => {
     expect(g.edges).toEqual([]);
   });
 
+  it("stamps the fetching tag onto memories whose live spaceId is opaque", async () => {
+    // The engine answers with its own opaque space ids, which share no format
+    // with the container tag. Crawling per tag is the only mapping the API
+    // contract actually gives us — a multi-tag request could not recover it.
+    const twoSpaces = corpusBackend({
+      documents: [
+        { id: "doc_a", containerTags: ["sm_alpha"] },
+        { id: "doc_b", containerTags: ["sm_beta"] },
+      ],
+      memoriesByTag: {
+        sm_alpha: [liveMemory({ id: "mem_a", spaceId: "qvZATNopaque1" })],
+        sm_beta: [liveMemory({ id: "mem_b", spaceId: "qvZATNopaque2" })],
+      },
+    });
+    const { live, calls } = await loadLive(twoSpaces);
+
+    const g = await live.liveGraph({ includeDocuments: false });
+
+    expect(
+      g.nodes.map((n) => [n.id, n.spaceId]).sort((a, b) => (a[0]! < b[0]! ? -1 : 1)),
+    ).toEqual([
+      ["mem_a", "sm_alpha"],
+      ["mem_b", "sm_beta"],
+    ]);
+    // One request per tag, each scoped to a single tag.
+    const memoryCalls = calls.filter((c) => c.url.includes("/v4/memories/list"));
+    expect(
+      memoryCalls.map((c) => (c.body as { containerTags: string[] }).containerTags),
+    ).toEqual([["sm_alpha"], ["sm_beta"]]);
+  });
+
+  it("skips a tag whose first page fails, keeping the others", async () => {
+    const flaky = corpusBackend({
+      documents: [
+        { id: "doc_a", containerTags: ["sm_alpha"] },
+        { id: "doc_b", containerTags: ["sm_beta"] },
+      ],
+      memoriesByTag: {
+        sm_alpha: [liveMemory({ id: "mem_a" })],
+        sm_beta: [liveMemory({ id: "mem_b" })],
+      },
+    });
+    const { live } = await loadLive((call) => {
+      const body = call.body as { containerTags?: string[] } | undefined;
+      if (
+        call.url.includes("/v4/memories/list") &&
+        body?.containerTags?.[0] === "sm_beta"
+      ) {
+        return jsonResponse({ error: "boom" }, 500);
+      }
+      return flaky(call);
+    });
+
+    const g = await live.liveGraph({ includeDocuments: false });
+
+    expect(g.nodes.map((n) => n.id)).toEqual(["mem_a"]);
+  });
+
   it("reports loaded/total while paging the memory corpus", async () => {
     const many = Array.from({ length: 250 }, (_, i) =>
       liveMemory({ id: `mem_page_${i}` }),

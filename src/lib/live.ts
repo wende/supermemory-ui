@@ -55,38 +55,70 @@ async function pageAllMemories(
     onProgress?.({ loaded: 0, total: 0 });
     return [];
   }
-  // Current engines accept multiple tags in one paginated request and expose
-  // the opaque-space-id -> container-tag mapping through the tag-list route.
-  // Using both avoids the old N-spaces × N-pages fan-out.
-  const tagBySpaceId = new Map(
-    (await resolveTagSummaries()).map((space) => [space.id, space.containerTag]),
+  // Fetch per tag so we can stamp the human containerTag onto spaceId.
+  // The live API returns opaque internal space IDs (e.g. qvZATN…) and the
+  // tag-list route's `id` is not documented as the same identifier, so a
+  // multi-tag request has no contract-supported way back to the tag.
+  //
+  // Tags are probed in parallel for totals, then drained sequentially so
+  // `loaded` climbs monotonically and the UI meter can track real pages.
+  const probes = await Promise.all(
+    tags.map(async (tag) => {
+      const { ok, data } = await proxyJson<MemoryListResponse>(
+        "/v4/memories/list",
+        {
+          method: "POST",
+          json: { containerTags: [tag], page: 1, limit: 100 },
+        },
+      );
+      return { tag, ok, data };
+    }),
   );
+
+  let total = 0;
+  for (const { ok, data } of probes) {
+    if (!ok || !data) continue;
+    total += data.pagination?.totalItems ?? data.memoryEntries?.length ?? 0;
+  }
+
   const byId = new Map<string, MemoryEntry>();
   let loaded = 0;
-  let total = 0;
-  let page = 1;
-  let totalPages = 1;
+  const report = () => onProgress?.({ loaded, total: Math.max(total, loaded) });
 
-  while (page <= totalPages && page <= 50) {
-    const { ok, data } = await proxyJson<MemoryListResponse>(
-      "/v4/memories/list",
-      {
-        method: "POST",
-        json: { containerTags: tags, page, limit: 100 },
-      },
-    );
-    if (!ok || !data?.memoryEntries) break;
-    total = data.pagination?.totalItems ?? data.memoryEntries.length;
-    totalPages = data.pagination?.totalPages ?? 1;
-    if (page === 1) onProgress?.({ loaded: 0, total });
-    for (const raw of data.memoryEntries) {
-      const tag = tagBySpaceId.get(raw.spaceId);
+  // Publish the denominator before the first page lands so the meter opens
+  // at 0/N instead of an unknown wait.
+  report();
+
+  for (const { tag, ok, data: first } of probes) {
+    if (!ok || !first?.memoryEntries) continue;
+
+    for (const raw of first.memoryEntries) {
       const entry = normalizeMemoryEntry(raw, tag);
       byId.set(entry.id, entry);
     }
-    loaded += data.memoryEntries.length;
-    onProgress?.({ loaded, total: Math.max(total, loaded) });
-    page += 1;
+    loaded += first.memoryEntries.length;
+    report();
+
+    let page = 2;
+    let totalPages = first.pagination?.totalPages ?? 1;
+    while (page <= totalPages && page <= 50) {
+      const { ok: pageOk, data } = await proxyJson<MemoryListResponse>(
+        "/v4/memories/list",
+        {
+          method: "POST",
+          json: { containerTags: [tag], page, limit: 100 },
+        },
+      );
+      if (!pageOk || !data?.memoryEntries) break;
+      for (const raw of data.memoryEntries) {
+        const entry = normalizeMemoryEntry(raw, tag);
+        byId.set(entry.id, entry);
+      }
+      loaded += data.memoryEntries.length;
+      totalPages = data.pagination?.totalPages ?? totalPages;
+      report();
+      page += 1;
+    }
   }
 
   return Array.from(byId.values());
@@ -349,27 +381,46 @@ export async function liveStats() {
 
 export async function liveHealth() {
   const started = performance.now();
-  const [{ ok, data }, { containerTags }, server] = await Promise.all([
+  const [{ ok, data }, { containerTags }, total, server] = await Promise.all([
     proxyJson<DocumentListResponse>("/v3/documents/list", {
       method: "POST",
       json: { page: 1, limit: 1 },
     }),
     liveSpaces(),
+    totalMemoryCount(),
     liveServerInfo(),
   ]);
   const latencyMs = Math.round(performance.now() - started);
+  // Space rollups count active memories only, so the retired ones are the
+  // difference against a total that includes them.
+  const active = containerTags.reduce((sum, space) => sum + space.memoryCount, 0);
   return {
     status: ok ? "ok" : "degraded",
     ...server,
     latencyMs,
     counts: {
       documents: data?.pagination?.totalItems ?? 0,
-      memories: containerTags.reduce((sum, space) => sum + space.memoryCount, 0),
-      forgotten: null,
+      memories: active,
+      forgotten: total === null ? null : Math.max(0, total - active),
+      // The API publishes no chunk total, and deriving one means crawling the
+      // whole corpus — the UI renders this as unavailable instead.
       chunks: null,
       spaces: containerTags.length,
     },
   };
+}
+
+/**
+ * Every memory including retired ones, read off the list endpoint's
+ * pagination rather than crawled: one entry is enough to learn the total.
+ */
+async function totalMemoryCount(): Promise<number | null> {
+  const tags = await resolveTags();
+  const { ok, data } = await proxyJson<MemoryListResponse>("/v4/memories/list", {
+    method: "POST",
+    json: { containerTags: tags, page: 1, limit: 1, includeForgotten: true },
+  });
+  return ok ? (data?.pagination?.totalItems ?? null) : null;
 }
 
 export async function liveGraph(

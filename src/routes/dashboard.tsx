@@ -53,11 +53,16 @@ export default function DashboardPage() {
   const [poll, setPoll] = useState<number | false>(false);
   const [pipelineRange, setPipelineRange] = useState<"active" | "recent">("active");
 
-  const healthQuery = useHealth();
-  const recentQuery = useMemoryList(RECENT_MEMORIES);
+  // Every count on this page moves while documents are being ingested, so the
+  // dependent queries poll alongside `useProcessing` rather than sitting stale
+  // until the pipeline drains.
+  const healthQuery = useHealth({ refetchInterval: poll });
+  const recentQuery = useMemoryList(RECENT_MEMORIES, { refetchInterval: poll });
   const processingQuery = useProcessing({ refetchInterval: poll });
-  const documentsQuery = useDocumentList(RECENT_DOCUMENTS);
-  const spacesQuery = useSpaces();
+  const documentsQuery = useDocumentList(RECENT_DOCUMENTS, {
+    refetchInterval: poll,
+  });
+  const spacesQuery = useSpaces({ refetchInterval: poll });
   const { spaces } = spacesQuery;
 
   const inflight = processingQuery.documents.length;

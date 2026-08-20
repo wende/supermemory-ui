@@ -89,6 +89,17 @@ describe("GET /api/health", () => {
           { headers: { "content-type": "application/json" } },
         );
       }
+      if (call.url.endsWith("/v4/memories/list")) {
+        // Three memories all-in against one active memory per the space
+        // rollup, so two of them are retired.
+        return new Response(
+          JSON.stringify({
+            memoryEntries: [],
+            pagination: { currentPage: 1, limit: 1, totalItems: 3, totalPages: 3 },
+          }),
+          { headers: { "content-type": "application/json" } },
+        );
+      }
       return new Response(JSON.stringify({}), {
         headers: { "content-type": "application/json" },
       });
@@ -103,8 +114,20 @@ describe("GET /api/health", () => {
       remoteConfigured: true,
       baseUrl: "https://engine.example.com",
     });
-    expect(body.counts).toMatchObject({ documents: 1, memories: 1, spaces: 1 });
-    expect(calls.some((call) => call.url.includes("/v4/memories/list"))).toBe(false);
+    expect(body.counts).toMatchObject({
+      documents: 1,
+      memories: 1,
+      forgotten: 2,
+      spaces: 1,
+    });
+    // The forgotten total is one bounded metadata read, not a corpus crawl.
+    const memoryCalls = calls.filter((call) =>
+      call.url.includes("/v4/memories/list"),
+    );
+    expect(memoryCalls).toHaveLength(1);
+    expect(memoryCalls[0]).toMatchObject({
+      body: { limit: 1, includeForgotten: true },
+    });
   });
 
   it("degrades rather than failing when the live instance errors", async () => {
